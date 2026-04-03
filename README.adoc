@@ -1,0 +1,33 @@
+= DocOps Box
+// tag::global-settings[]
+:ruby_vrsn_3_2: 3.2.7
+:ruby_vrsn_3_3: 3.3.7
+:ruby_vrsn_3_4: 3.4.1
+:ruby_vrsn_latest: {ruby_vrsn_3_4}
+:ruby_vrsn_dflt: {ruby_vrsn_3_2}
+:docopsbox_vrsn: 0.1.0
+:this_proj_vrsn: 0.1.0
+:next_proj_vrsn: 0.2.0
+:this_proj_slug: box
+:this_prod_slug: docops-box
+:proj_repo_www: https://github.com/DocOps/{this_proj_slug}
+:proj_repo_raw: https://raw.githubusercontent.com/DocOps/{this_proj_slug}/latest
+:proj_issues_url: https://github.com/DocOps/{this_proj_slug}/issues
+// end::global-settings[]
+
+Get up and running with DocOps/docs-as-code shell and runtime tools in minutes on macOS, Linux, or Windows.
+
+*DocOps Box* uses Docker and VS Code Dev Containers to provide a consistent, reproducible environment for documentation work across different operating systems and team members.
+
+[NOTE]
+====
+This branch (`main`) is a placeholder.
+Full documentation and all project files are on the link:{proj_repo_www}/tree/latest[`latest` branch].
+
+To get started:
+
+----
+curl -fsSL {proj_repo_raw}/docopsbox -o docopsbox && chmod +x docopsbox
+./docopsbox init
+----
+====
