@@ -1,0 +1,11 @@
+{
+  "name": "test-eleventy-site",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "eleventy"
+  },
+  "dependencies": {
+    "@11ty/eleventy": "^3.0.0"
+  }
+}

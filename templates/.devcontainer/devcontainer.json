@@ -1,0 +1,59 @@
+{
+  // DocOps Box; VS Code Dev Container Configuration
+  // Edit .env for project settings (PROJECT_SLUG, IMAGE_VARIANT, RUBY_VERSION, etc.)
+  // See README.adoc for documentation and first-time setup instructions.
+  "name": "DocOps Box",
+  "dockerComposeFile": "../.config/docopsbox.yml",
+  "service": "docops",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "appuser",
+  // Run once after the container is created. Guarded for projects without a Gemfile/package.json/requirements.txt.
+  // gem install bundler updates bundler in the bundle volume; non-fatal (|| true) so a slow
+  // network on first create cannot abort the rest of the command.
+  "postCreateCommand": "gem install bundler 2>/dev/null || true && ([ -f Gemfile ] && bundle install || true) && ([ -f package.json ] && npm install || true) && ([ -f requirements.txt ] && pip install -r requirements.txt || true)",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "asciidoctor.asciidoctor-vscode",
+        "eamodio.gitlens",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "asciidoc.pdf.engine": "asciidoctor-pdf"
+      }
+    }
+  },
+  // SSH agent forwarding for Git operations inside the container (optional).
+  // Enables `git push`/`pull` over SSH from inside the Dev Container.
+  // Uncomment ONE "mounts" line below matching your OS, then uncomment SSH_AUTH_SOCK
+  // in remoteEnv.
+  //
+  // Windows / WSL2 users: Docker Desktop forwards the agent automatically
+  //; skip this section entirely.
+  //
+  // macOS (Docker Desktop); fixed VM-internal socket path, always the same:
+  // "mounts": ["source=/run/host-services/ssh-auth.sock,target=/ssh-agent,type=bind,consistency=cached"],
+  //
+  // Linux (Docker Engine); socket path varies; VS Code reads it from your shell env:
+  // "mounts": ["source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind,consistency=cached"],
+  "remoteEnv": {
+    // Uncomment after setting up the SSH agent mount above:
+    // "SSH_AUTH_SOCK": "/ssh-agent",
+    //
+    // UID/GID reconciliation for native Linux only. macOS and Windows/WSL2 users can
+    // ignore this; Docker Desktop provides transparent file ownership mapping.
+    //
+    // On native Linux, VS Code must be launched from a terminal so these variables
+    // are present in the environment. Use `dxbx code` (recommended) or ensure
+    // HOST_UID and HOST_GID are exported in ~/.profile (sourced by login shells):
+    //   export HOST_UID=$(id -u)
+    //   export HOST_GID=$(id -g)
+    "HOST_UID": "${localEnv:HOST_UID}",
+    "HOST_GID": "${localEnv:HOST_GID}",
+    "RUN_USER": "appuser"
+  },
+  // Uncomment to forward local ports (e.g., Jekyll server):
+  // "forwardPorts": [4000],
+  "shutdownAction": "stopCompose"
+}

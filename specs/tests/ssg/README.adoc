@@ -1,0 +1,106 @@
+= SSG Smoke Tests
+:toc: macro
+
+Smoke tests that verify popular static site generators (SSGs) install and build
+correctly inside the DocOps Box container via `dxbx exec`.
+
+Each test:
+
+. Creates a temporary project directory with minimal fixture files and DocOps Box
+  config (copied from `templates/`).
+. Runs `dxbx exec` to install dependencies (`npm install` or `pip install`) and
+  build the site inside a fresh container.
+. Verifies the expected output directory is produced.
+. Cleans up the temp directory and associated Docker volumes on exit.
+
+toc::[]
+
+== Prerequisites
+
+* `dxbx` installed (`~/.local/bin/dxbx` in `PATH`)
+* Docker running with the `docopslab/box-max:work` image available
+* Internet access (npm/pip package downloads; Antora UI bundle from GitLab)
+
+== Running Tests
+
+Run all SSG tests:
+
+[source,sh]
+----
+./specs/tests/ssg/run-all.sh
+----
+
+Run individual tests or a subset:
+
+[source,sh]
+----
+./specs/tests/ssg/run-all.sh antora mkdocs       # select by name
+./specs/tests/ssg/antora/test.sh                 # run one directly
+----
+
+Keep temp directories after the run for inspection:
+
+[source,sh]
+----
+DEBUG=1 ./tests/ssg/run-all.sh
+----
+
+== SSGs Covered
+
+[cols="1,1,2,1",options="header"]
+|===
+| SSG | Runtime | Installed via | Output dir
+
+| Antora
+| Node.js
+| `npm install` (`@antora/cli`, `@antora/site-generator-default`)
+| `build/site/`
+
+| Docusaurus
+| Node.js
+| `npm install` (`@docusaurus/core`, `@docusaurus/preset-classic`)
+| `build/`
+
+| Astro
+| Node.js
+| `npm install` (`astro`)
+| `dist/`
+
+| Eleventy (11ty)
+| Node.js
+| `npm install` (`@11ty/eleventy`)
+| `_site/`
+
+| Sphinx
+| Python
+| `pip install` (`sphinx`)
+| `_build/html/`
+
+| MkDocs
+| Python
+| `pip install` (`mkdocs`)
+| `site/`
+|===
+
+== Notes
+
+=== Antora
+
+Antora reads content from a git repository.
+The Antora test initialises a git repo inside the container (`git init && git commit`)
+before running the build, mirroring what a user would do after cloning a project.
+The Antora UI bundle is fetched from GitLab during the build; internet access is required.
+
+=== Python venv
+
+The DocOps Box entrypoint bootstraps a Python virtual environment at `/opt/venv`
+on the first container start.
+Packages installed via `pip install` persist in the `docops-test-sphinx-python`
+(or `-mkdocs-python`) Docker volume across `dxbx exec` calls within the same test.
+The `_cleanup` function removes these volumes when the test exits.
+
+=== Volume isolation
+
+Each test uses a distinct `PROJECT_SLUG` (`test-antora`, `test-docusaurus`, etc.),
+giving every test its own set of Docker volumes.
+This prevents cross-test contamination and allows tests to run in parallel if needed.

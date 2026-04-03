@@ -1,0 +1,87 @@
+name: Main CI/CD Pipeline
+
+on:
+  pull_request:
+    branches: [ latest ]
+    types: [ opened, synchronize, reopened ]
+  push:
+    branches: [ latest ]
+
+# Set permissions for GitHub Pages deployment and PR comments
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  pull-requests: write
+  deployments: write
+
+# Allow only one concurrent deployment per ref
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Publish agent docs to agent-docs branch (main branch only)
+  publish-agent-docs:
+    name: Publish Agent Docs Branch
+    if: github.event_name == 'push' && github.ref == 'refs/heads/latest'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Generate agent docs
+        run: bundle exec rake gen_agent_docs
+
+      - name: Setup agent-docs branch
+        run: |
+          # Check if agent-docs branch exists
+          if git ls-remote --exit-code --heads origin agent-docs; then
+            echo "Branch exists, checking out"
+            git fetch origin agent-docs
+            git checkout agent-docs
+          else
+            echo "Branch doesn't exist, creating orphan branch"
+            git checkout --orphan agent-docs
+            git rm -rf .
+          fi
+
+      - name: Copy agent docs
+        run: |
+          # Start fresh - remove everything
+          find . -maxdepth 1 ! -name '.git' ! -name '.' ! -name '..' -exec rm -rf {} +
+
+          # Copy agent docs from source
+          if [ -d "docs/agent" ]; then
+            cp -r docs/agent/* .
+            echo "✅ Agent docs copied"
+          else
+            echo "❌ Agent docs not found at docs/agent"
+            exit 1
+          fi
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update agent docs from ${{ github.sha }}" || echo "No changes to commit"
+          git push origin agent-docs
+
+      - name: Create deployment summary
+        run: |
+          echo "## 📚 Agent Docs Published!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** agent-docs" >> $GITHUB_STEP_SUMMARY
+          echo "**Source Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Published at:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

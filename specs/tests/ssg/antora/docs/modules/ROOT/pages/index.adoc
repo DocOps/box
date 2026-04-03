@@ -1,0 +1,5 @@
+= Hello World
+
+DocOps Box + Antora smoke test.
+
+This page confirms that Antora can build AsciiDoc content inside the DocOps Box container.

@@ -1,0 +1,48 @@
+# DocOps Box — Docker build context exclusions
+# Keeps the build context fast and prevents development files from leaking into
+# the image. Files intentionally included in the build (Gemfile*, package.json,
+# requirements.txt, dockerfile-*.sh) are expected in the project root (the
+# build context) and are NOT listed here. The repo's own copies live under
+# templates/ but users place them at their project root before building.
+
+# Repo-only directories — not needed in user image builds
+templates/
+!templates/.zshrc
+bin/
+scripts/
+specs/
+
+# Version control
+.git/
+.gitignore
+
+# Agent/session scratch directories
+.agent/
+.agents/
+AGENTS.md
+
+# Documentation source (not needed inside the image)
+*.adoc
+*.html
+LICENSE
+README.adoc
+
+# Development tooling configs/manifests
+.config/
+Rakefile
+Gemfile*
+
+# Editor and IDE
+.vscode/
+.idea/
+
+# OS artifacts
+.DS_Store
+
+# Runtime artifacts
+_site/
+.jekyll-cache/
+tmp/
+*.log
+*.bak
+*~
