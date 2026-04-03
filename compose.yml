@@ -1,0 +1,71 @@
+# DocOps Box — Docker Compose service definition
+# Edit .env to configure PROJECT_SLUG, image variant, Ruby version, etc.
+# For machine-local overrides, create .env.local (gitignored).
+# See README.adoc for full documentation.
+
+name: docops-box
+
+services:
+  docops:
+    env_file:
+      - .env
+      - path: .env.local
+        required: false
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUBY_VERSION: ${RUBY_VERSION:-3.2.7}
+        IMAGE_CONTEXT: ${IMAGE_CONTEXT:-work}
+        ADD_NODEJS: ${ADD_NODEJS:-true}
+        ADD_PYTHON: ${ADD_PYTHON:-true}
+        ADD_PANDOC: ${ADD_PANDOC:-true}
+        ADD_VALE: ${ADD_VALE:-true}
+        ADD_LIBREOFFICE: ${ADD_LIBREOFFICE:-false}
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    image: ${IMAGE_REGISTRY:-docopslab}/box-${IMAGE_VARIANT:-max}:${IMAGE_CONTEXT:-work}
+    container_name: docopsbox_${PROJECT_SLUG:-project}
+    environment:
+      # Passed to entrypoint.sh for UID/GID reconciliation at container startup.
+      # On Linux, docopsbox sets these automatically from `id -u` / `id -g`.
+      # On macOS with Docker Desktop, the VM provides transparent ownership mapping
+      # and these can be left unset.
+      HOST_UID: ${HOST_UID:-}
+      HOST_GID: ${HOST_GID:-}
+      RUN_USER: ${RUN_USER:-appuser}
+      IMAGE_CONTEXT: ${IMAGE_CONTEXT:-work}
+    volumes:
+      - .:/workspace
+      - docops-shell-history:/commandhistory
+      - docops-project-bundle:/usr/local/bundle
+      # Shared npm and pip download caches. Mounted at the fixed paths set by
+      # npm_config_cache and PIP_CACHE_DIR in the image. Shared across all
+      # projects so downloading a package once benefits all local projects.
+      - docops-npm-cache:/npm-cache
+      - docops-pip-cache:/pip-cache
+    working_dir: /workspace
+    command: zsh
+    # Uncomment to forward local ports (e.g., Jekyll server):
+    # ports:
+    #   - "4000:4000"
+    labels:
+      docopsbox.managed: "true"
+      docopsbox.project_slug: ${PROJECT_SLUG:-project}
+
+volumes:
+  docops-shell-history:
+    # Precious: persists across resets. Only removed by `docopsbox reset --full`.
+    name: docops-shell-history
+  docops-project-bundle:
+    # Disposable: cleared on `docopsbox reset`. Rebuilt automatically on next run.
+    # The actual Docker volume name embeds PROJECT_SLUG for per-project isolation.
+    name: docops-${PROJECT_SLUG:-project}-bundle
+  docops-npm-cache:
+    # Shared npm download cache. Speeds up `npm install` across all projects.
+    # Disposable: safe to delete; npm will re-download packages as needed.
+    name: docops-npm-cache
+  docops-pip-cache:
+    # Shared pip download cache. Speeds up `pip install` across all projects.
+    # Disposable: safe to delete; pip will re-download packages as needed.
+    name: docops-pip-cache

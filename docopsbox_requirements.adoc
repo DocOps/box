@@ -1,0 +1,379 @@
+= DocOps Box: Product Requirements & Strategic Constraints
+:doctype: article
+:toc: macro
+:toclevels: 3
+:sectnums:
+:icons: font
+
+toc::[]
+
+== Purpose
+
+This document defines the product requirements, architectural constraints, and strategic direction for DocOps Box.
+It serves as the controlling specification for all implementation decisions:
+
+* `Dockerfile`
+* Compose service
+* `docopsbox` CLI wrapper
+* VS Code / Dev Container integration
+* published image management
+* custom build assistance
+* persistence strategy
+* namespaces
+* development conventions
+
+DocOps Box exists to give tech-savvy non-developers -- technical writers, project managers, paralegals, educators, researchers -- a reliable, portable, zero-friction development environment for docs-as-code work on macOS, Linux, and Windows (via WSL2).
+
+
+== Guiding Principles
+
+Every requirement in this document derives from the following non-negotiable principles.
+When implementation decisions conflict, resolve them in the order listed.
+
+[horizontal]
+Transparent file ownership::
+Files created inside the container _must_ appear as owned by the host user.
+Permission errors on bind-mounted directories are the single most common reason non-expert users abandon Docker-based workflows.
+This principle takes priority over all others because violating it makes everything else irrelevant.
+
+Zero-setup launch::
+After a one-time image pull, users must be able to enter a working environment via a single command or a single VS Code action.
+No build step, no cloning, no configuration file authoring required for the default case.
+
+No repository cloning required::
+A user must be able to `cd` into any existing project directory and start the environment there.
+The project's own repo may be cloned by developers and contributors, but end users must never need to.
+
+Minimal host dependencies::
+Only Docker (with Compose v2) and curl are required on the host.
+Git on the host is helpful but not mandatory.
+VS Code with the Dev Containers extension is the strongly recommended and only supported IDE path.
+
+Instant feedback::
+After the initial image pull, container startup must feel instantaneous.
+Dependency installation (gems, npm packages) happens _inside_ the container against a persistent volume, not during image build and not at container start (other than initial install).
+
+Cross-platform consistency::
+Behavior must be identical across macOS, Linux, and Windows/WSL2.
+Solutions that work on only one platform are insufficient.
+
+
+== Target Users and Entry Paths
+
+Understanding how users encounter and adopt DocOps Box is critical to every design decision.
+
+=== Solo Discoverer
+
+A technical writer needs to use several Ruby and Nodejs utilities such as jekyll and redocly-cli, as well as shell tools like Pandoc and Vale.
+They have Docker but no Ruby, no Node, no familiarity with Bundler or gem management and only minimal experience with Unix-like shell envirnonments.
+
+Their journey:
+
+. They find a reference to DocOps Box in another tool's README.
+. They need a way to bootstrap the environment _into their existing project directory_ without cloning the DocOps Box repo.
+. They configure no more than one optional value (project slug) and run one command.
+. The container pulls, starts, and they have a working shell with the tool available.
+
+*Implication:* The `docopsbox` script and/or a lightweight init mechanism must be obtainable and usable independently of the full repository or any additional files.
+
+=== Team Member
+
+A contributor joins a project that has already committed `.devcontainer/`, `compose.yml`, and `.env` to its repo.
+
+Their journey:
+
+. They clone the project repo.
+. They open it in VS Code and accept the "Reopen in Container" prompt.
+. The image pulls, the Dev Container starts, `postCreateCommand` installs project dependencies, and they are working.
+
+*Implication:* The committed configuration files must be self-contained and must not assume the DocOps Box repo is present on the host.
+
+=== DocOps Box Contributor
+
+A developer working on DocOps Box itself clones the repo, has all files locally, and may build images from source.
+
+*Implication:* The local build path (`docopsbox build` / `docker compose build`) must remain fully functional, but it is a secondary workflow, not the primary one.
+
+
+== File Ownership and UID/GID Mapping
+
+This is the single hardest problem in the project and must be solved robustly.
+
+=== Requirements
+
+. The container user's effective UID and GID MUST match the host user's UID and GID when interacting with bind-mounted files.
+. The solution MUST work with pre-built images pulled from a registry (build-time UID baking is not acceptable as the sole mechanism).
+. The solution MUST NOT require the user to create, manage, or understand an entrypoint script or any additional file in their project directory.
+. The solution MUST handle the common case (UID 1000 on single-user Linux/WSL2, variable UIDs on macOS and multi-user systems).
+. The solution must not require root execution of the main process.
+
+=== Constraints
+
+The previous approach (`docksh`) baked UID/GID into the image at build time via `--build-arg`.
+This worked for locally built images but is incompatible with pre-built registry images, which cannot know the consumer's UID at build time.
+
+The current `Dockerfile` does not create a user at all, which must be corrected.
+
+=== Strategic Direction
+
+The image must ship with a default user (e.g., `appuser` at UID 1000).
+UID/GID reconciliation must happen at container start, not at image build.
+The mechanism for this lives _inside the image_ as part of the image's own entrypoint infrastructure -- the `Dockerfile`'s `ENTRYPOINT` instruction.
+This means the user's project directory contains zero extra files to support it.
+
+The Compose service and `docopsbox` script pass the host user's UID and GID as environment variables.
+The in-image entrypoint detects whether the runtime UID/GID differ from the baked-in defaults and adjusts accordingly, then drops privileges to the target user before executing the requested command or shell.
+
+On macOS with Docker Desktop, file ownership is handled transparently by the VM layer and UID remapping is effectively a no-op.
+The entrypoint must not break or add latency in this case.
+
+
+== Image Taxonomy
+
+=== Naming Scheme
+
+Image tags follow the pattern:
+
+----
+<registry>/box-<variant>:<context>
+----
+
+Examples:
+
+* `docopslab/box-max:work`
+* `docopslab/box-min:live`
+* `docopslab/box-acme:work` (for a custom variant)
+
+=== Variants
+
+`box-min:work`::
+Zsh, Ruby, Bundler, Git, Pandoc, Vale.
+The smallest useful image for pure docs-as-code work.
+
+`box-min:live`::
+Bash, Ruby, Bundler, Pandoc, Vale.
+The smallest useful image for CI/CD and automation.
+
+`box-max`::
+Everything in `min`, plus Node.js and Python.
+Additionally, `work` context includes LibreOffice CLI tools.
+
+Variant selection determines which tools are present.
+It is controlled by the `IMAGE_VARIANT` value in `.env` and corresponds to a pre-built image tag.
+
+=== Contexts
+
+[horizontal]
+`work`::
+Interactive development environment.
+Includes Zsh, Oh My Zsh, sudo, nano, fonts, inotify-tools, and timezone data.
+Used for daily authoring and development.
+
+`live`::
+Automation and CI/CD environment.
+Bash only, no interactive shell enhancements, no sudo.
+Used in pipelines, scheduled builds, and headless rendering.
+
+Context selection determines the shell environment and interactive tooling.
+It is controlled by the `IMAGE_CONTEXT` value in `.env`.
+
+=== Versioning and Matrix
+
+The project must maintain and publish a clear matrix of officially supported images.
+The matrix has three axes:
+
+. *Ruby version* (e.g., 3.2, 3.3, 3.4)
+. *Variant* (`min`, `max`)
+. *Context* (`work`, `live`)
+
+Each cell in the matrix is a distinct image tag.
+Not every combination needs to be published at all times, but the set of supported combinations must be explicitly declared and discoverable.
+
+The image version tracks the DocOps Box release version, not the versions of included tools.
+Tool versions are recorded as image labels (OCI standard) and must be queryable.
+
+=== Image Labels
+
+Every published image must carry OCI-standard labels including at minimum:
+
+* `org.opencontainers.image.version` -- DocOps Box version
+* `org.opencontainers.image.created` -- Build timestamp
+* Tool-specific version labels for Ruby, Node.js, Python, Pandoc, Vale, and any other included tool
+* `docopsbox.variant` -- `min` or `max`
+* `docopsbox.context` -- `work` or `live`
+
+These labels enable the `docopsbox status` and `docopsbox doctor` commands to display exactly what is inside a running image.
+
+
+== Dockerfile Architecture
+
+=== Single Dockerfile, Multiple Outputs
+
+One `Dockerfile` produces all variant-context combinations.
+The variant and context are controlled by build arguments, not by multi-stage targets or separate files.
+
+=== User Creation
+
+The `Dockerfile` must create the application user with a well-known default UID/GID (1000:1000).
+This user is used at build time for any operations that must happen as non-root.
+Runtime adjustment of UID/GID is _not_ the `Dockerfile`'s responsibility.
+
+=== Conditional Tool Installation
+
+Each optional tool (Node.js, Python, Pandoc, Vale, LibreOffice) is gated by a build argument.
+The variant presets (`min` vs `max`) are expressed as _sets of these arguments_, not as separate code paths.
+The `Dockerfile` itself does not know about variant names.
+
+=== Entrypoint
+
+The image must define an `ENTRYPOINT` that performs UID/GID reconciliation and any first-run initialization.
+The `CMD` remains the default shell (`zsh` for `work`, `bash` for `live`).
+This ensures that `docker run`, `docker compose run`, `docker compose exec`, and VS Code Dev Container attachment all invoke the reconciliation logic.
+
+=== Build Script Hooks
+
+The pre-build and post-build script hook mechanism is a valuable escape hatch for advanced users.
+However, the `COPY` instructions for these scripts must not cause build failures when the scripts are absent from the build context.
+If a hook script is not found, the build proceeds silently.
+
+
+== Compose and Dev Container Integration
+
+=== Compose Service
+
+The `compose.yml` file must:
+
+* Pass `HOST_UID` and `HOST_GID` to the container environment (defaulting to 1000 if not set).
+* Reference the image by its full registry tag for the pull-based workflow.
+* Support local build via `docker compose build` for contributors.
+* Define the persistent volumes for shell history and per-project gem bundles.
+
+=== Dev Container
+
+The `devcontainer.json` file must:
+
+* Reference the Compose service (not a standalone `Dockerfile`).
+* Configure `postCreateCommand` to install project dependencies.
+* Include sensible VS Code extension recommendations for AsciiDoc authoring.
+* Work without modification when copied into a user's project alongside `compose.yml` and `.env`.
+
+=== Compose-to-Dev Container Synchronization
+
+The Compose and Dev Container configurations must be kept in sync.
+The `devcontainer.json` references the Compose service, so the Compose file is the source of truth for image tags, build arguments, and volume definitions.
+Any change to the Compose file that affects the Dev Container must be accompanied by a corresponding update to `devcontainer.json` where not handled dynamically.
+
+=== SSH Agent Forwarding
+
+SSH agent forwarding for authenticated Git operations must be available but must not cause errors when the SSH agent socket does not exist.
+The current hard mount of `/run/host-services/ssh-auth.sock` will fail on Linux hosts where that path does not exist.
+This must be made resilient.
+
+
+== The CLI Wrapper
+
+=== Role and Scope
+
+`docopsbox` is a _thin transparency layer_ over Docker Compose.
+Its purpose is to make Docker Compose ergonomic for non-expert users by:
+
+* Printing every underlying Docker command before execution (the "no magic" principle).
+* Providing friendly diagnostics (`doctor`, `status`).
+* Implementing safety rails around destructive operations (`reset`, `reset --full`).
+* Resolving `PROJECT_SLUG` through a multi-tier fallback.
+
+It must _not_ grow to replicate Docker Compose functionality.
+If Compose already does something, `docopsbox` delegates rather than reimplements.
+
+=== `init` Command
+
+A new `init` subcommand must bootstrap a project directory for DocOps Box usage.
+This command:
+
+* Creates `.devcontainer/devcontainer.json`, `compose.yml`, `.env`, and `.gitignore` additions.
+* Does not require the DocOps Box repository to be cloned.
+* Must be executable from a single `curl | bash` invocation or equivalent single-step download.
+* Prompts the user for `PROJECT_SLUG` or derives it from the directory name.
+* Does not overwrite existing files without confirmation.
+
+This is the primary mechanism for the "solo discoverer" user path.
+
+=== `list` Command
+
+A new `list` subcommand must display all DocOps Box-managed volumes and containers across projects.
+This gives users visibility into what Docker resources DocOps Box has created on their system.
+
+=== Version and Environment Display
+
+The `status` command must display:
+
+* Project slug and image details (variant, context, Ruby version)
+* Container state (running, stopped, not created)
+* Volume inventory with sizes and disposition (precious vs. disposable)
+* Tool versions detected from image labels
+
+The `doctor` command must diagnose:
+
+* Docker daemon availability and version
+* Compose version compatibility
+* Image availability (pulled vs. needs pull vs. needs build)
+* Volume health and version compatibility (Ruby version mismatch detection)
+* UID/GID mapping correctness
+* SSH agent socket availability
+
+
+== Volume Strategy
+
+=== Shell History
+
+The `docops-shell-history` volume is _precious_ and shared across all projects.
+It persists Zsh/Bash history so users retain their command learning across sessions.
+
+* Only deleted by explicit `docopsbox reset --full` with double confirmation
+* Backed up on demand via `docopsbox backup-history`
+* Restoration procedure must be documented
+
+=== Per-project Dependency Bundles
+
+Each project gets a `docops-{slug}-bundle` volume.
+These are _disposable_: cleared on `docopsbox reset`, rebuilt automatically on next container start.
+
+Parallel solutions are needed for Node.js (`node_modules`) and Python (`venv` or `site-packages`).
+Persistence must be handled using 
+
+=== Runtimes Version Compatibility
+
+When the image's Ruby version changes, native gem extensions in a cached bundle volume may be incompatible.
+The entrypoint must detect this condition (e.g., by comparing a version marker file inside the volume against the running Ruby version) and either:
+
+* Automatically clear and reinstall the bundle, or
+* Warn the user clearly and suggest `docopsbox reset`.
+
+The user must never encounter a cryptic native extension load error without guidance.
+
+Other runtimes (Node.js, Python) may have similar compatibility issues that require detection and user-friendly handling, but they are not the priority at this time.
+
+
+== What is Not In Scope
+
+The following are explicitly excluded from DocOps Box's responsibility:
+
+Application-level dependency management::
+DocOps Box provides the runtime; the user's Gemfile, package.json, or requirements.txt are the project's concern.
+DocOps Box runs `bundle install` and `npm install` as a convenience, not as a guarantee.
+
+Source code management::
+Git is provided as a tool.
+DocOps Box does not manage repositories, branches, or remotes, and it is the first tool users should install natively.
+
+CI/CD pipeline definition::
+The `live` image is suitable for use in pipelines, but DocOps Box does not generate or manage pipeline configuration.
+
+Multi-user access control::
+DocOps Box handles a single host user's UID/GID.
+Multi-tenant or multi-user container scenarios are out of scope.
+
+Secrets management::
+API tokens, SSH private keys, and other secrets are the user's responsibility.
+DocOps Box provides mechanisms (environment variables, volume mounts) to pass them in, but does not store or manage them.
+The un-shared `.env.local` file is a recommended place for secrets on a user's host workstation.

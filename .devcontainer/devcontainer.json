@@ -1,0 +1,51 @@
+{
+  // DocOps Box — VS Code Dev Container Configuration
+  // Edit .env for project settings (PROJECT_SLUG, IMAGE_VARIANT, RUBY_VERSION, etc.)
+  // See README.adoc for documentation and first-time setup instructions.
+  "name": "DocOps Box",
+  "dockerComposeFile": "../compose.yml",
+  "service": "docops",
+  "workspaceFolder": "/workspace",
+
+  // Run once after the container is created. Guarded for projects without a Gemfile.
+  "postCreateCommand": "gem install bundler && ([ -f Gemfile ] && bundle install || true) && ([ -f package.json ] && npm install || true)",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "asciidoctor.asciidoctor-vscode",
+        "eamodio.gitlens",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "asciidoc.pdf.engine": "asciidoctor-pdf"
+      }
+    }
+  },
+
+  // Mount SSH agent for authenticated Git operations (opt-in).
+  // On Linux/macOS: ensure SSH_AUTH_SOCK is set in your shell before opening VS Code.
+  // On Windows (WSL2): Docker Desktop forwards the agent automatically.
+  "mounts": [
+    "source=/run/host-services/ssh-auth.sock,target=/ssh-agent,type=bind,consistency=cached"
+  ],
+
+  "remoteEnv": {
+    "SSH_AUTH_SOCK": "/ssh-agent",
+    // UID/GID reconciliation: read from the local shell environment and forwarded
+    // to the container entrypoint. On Linux, add these to ~/.profile or ~/.bashrc:
+    //   export HOST_UID=$(id -u)
+    //   export HOST_GID=$(id -g)
+    // On macOS with Docker Desktop, Docker's VM provides transparent ownership
+    // mapping and these can be omitted.
+    "HOST_UID": "${localEnv:HOST_UID}",
+    "HOST_GID": "${localEnv:HOST_GID}",
+    "RUN_USER": "appuser"
+  },
+
+  // Uncomment to forward local ports (e.g., Jekyll server):
+  // "forwardPorts": [4000],
+
+  "shutdownAction": "stopCompose"
+}

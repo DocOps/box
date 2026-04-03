@@ -1,0 +1,716 @@
+= DocOps Box
+// tag::global-settings[]
+:ruby_vrsn_3_2: 3.2.7
+:ruby_vrsn_3_3: 3.3.7
+:ruby_vrsn_3_4: 3.4.1
+:ruby_vrsn_latest: {ruby_vrsn_3_4}
+:ruby_vrsn_dflt: {ruby_vrsn_3_2}
+:docopsbox_vrsn: 0.1.0
+:this_proj_vrsn: 0.1.0
+:next_proj_vrsn: 0.2.0
+:this_proj_slug: box
+// Product/Docker slug — differs from the GitHub repo name (DocOps/box)
+:this_prod_slug: docops-box
+:document: website
+ifdef::env-github[]
+:document: README
+endif::[]
+:experimental:
+:imagesdir: assets/images
+:proj_docs_www_prime: https://docops.github.io/{this_proj_slug}
+:proj_repo_www_prime: https://github.com/DocOps/{this_proj_slug}
+:proj_repo_git_prime: git@github.com:DocOps/{this_proj_slug}.git
+:proj_repo_raw_prime: https://raw.githubusercontent.com/DocOps/{this_proj_slug}/latest
+:proj_issues_url: https://github.com/DocOps/{this_proj_slug}/issues
+:aylstack_repo_www: https://github.com/DocOps/aylstack
+// Change the following if you release a fork of this project
+:proj_docs_www: {proj_docs_www_prime}
+:proj_repo_www: {proj_repo_www_prime}
+:proj_repo_git: {proj_repo_git_prime}
+:proj_repo_raw: {proj_repo_raw_prime}
+// end::global-settings[]
+:ohmyzsh_www: https://ohmyz.sh
+ifndef::env-github[:icons: font]
+:toc: macro
+:toclevels: 3
+
+Get up and running with DocOps/docs-as-code shell and runtime tools in minutes on macOS, Linux, or Windows.
+
+*DocOps Box* uses Docker and VS Code Dev Containers to provide a consistent, reproducible environment for documentation work across different operating systems and team members.
+
+toc::[]
+
+[[who-for]]
+[%quiet]
+== Introduction
+
+This project is geared as a quickstart for meeting *_non_-developer tech or clerical workers*, typically on their *Windows* or maybe *MacOS* systems, not yet set up as "`development environments`" with tools like [.buzz]*Ruby*, [.buzz]*Node.js*, [.buzz]*Python*, [.buzz]*Git*, [.buzz]*Pandoc*, and the world of capabilities that these tools open up.
+
+[NOTE]
+This entire project is geared toward *Windows, Mac, _and_ Linux* users, but we assume virtually zero [.term.term-unixlike]#Linux/Unix# knowledge or preference.
+You will be using a commandline (terminal), and it needs to be (1) Mac-based or (2) Linux-based (including via WSL2 on Windows).
+
+This project is intended to meet uers where I have found these "`tech-savvy non-programmers`" among my clients the past several years, such as [.buzz]*technical writers*, [.buzz]*project managers*, and professional [.buzz]*document wranglers* like [.buzz]*paralegals*, non-software [.buzz]*engineers*, [.buzz]*researchers*, and [.buzz]*educators*.
+
+DocOps Box is specifically geared toward the link:{aylstack_repo_www}[[.buzz]*AYL DocStack*]: applications using AsciiDoc, YAML, and Liquid to build documents and documentation.
+
+[NOTE.buzz]
+This project is alternatively called the [.buzz]*Ruby DocOps Docker Toolkit*, or [.buzz]*Ruby DocOps*, as it specializes in providing an environment and instructions for performing [.buzz]#document operations#, such as _migration_, _authoring_, _editing_, _conversion_, _rendering_, _management_, and _delivery_.
+The official Docker image for the product is labeled Ruby DocOps, and the project itself is called *DocOps Box*.
++
+See <<beyond-ruby-docops>> for more about non-Ruby adaptation of this approach.
+
+The main intent is to provide the basics for these fairly technical/non-expert users to operate with the power of advanced "`docs-as-code`" techniques that only programmers, hackers, and IT professionals have typically bothered messing with until recently.
+See <<who-for>> for more on the intended user base and *use cases* for this project.
+
+This quickstart toolkit is intended to provide a proper swath of technologies in the form of a *custom-designed [.buzz]#Docker# image* you can run as a container on your system -- whatever that system may be.
+
+See <<image-variants-contexts>> for a full comparison.
+
+
+[[when-to-use]]
+== When to Use DocOps Box
+
+[cols="1,3",options="header"]
+|===
+| Scenario | Recommendation
+
+| You use one DocOps Lab tool occasionally
+| Use that tool's own Docker image directly
+
+| You regularly use multiple AYL DocStack tools
+| Use DocOps Box
+
+| You are setting up a team documentation environment
+| Use DocOps Box with a shared `.env` file in Git
+
+| You need a CI/CD pipeline for docs automation
+| Use DocOps Box `min:live` image
+
+| You want VS Code Dev Containers for docs work
+| Use DocOps Box `max:work` with `.devcontainer/`
+|===
+
+[[native-vs-docopsbox]]
+== Native Install vs DocOps Box
+
+[cols="1,1,1",options="header"]
+|===
+| Criterion | Native Install | DocOps Box
+
+| Setup time (first use)
+| 30--60 min (varies by OS)
+| ~5 min
+
+| Reproducibility across machines
+| High effort
+| Automatic via committed `compose.yml`
+
+| Team-wide standardization
+| Requires coordination
+| One committed `.env` + `compose.yml`
+
+| Works on Windows
+| Requires WSL2 + manual setup
+| Yes (via WSL2 + Docker)
+
+| IDE integration (VS Code)
+| Full native
+| Full via Dev Containers extension
+
+| Per-project gem isolation
+| rbenv + Bundler config
+| Named volume per `PROJECT_SLUG`
+
+| Suitable for CI/CD
+| Requires environment setup steps
+| Native via `min:live` image
+|===
+
+[[prerequisites]]
+== One-time Prerequisites
+
+. *Docker* (Engine 24+, or Docker Desktop)
+** Linux: https://docs.docker.com/engine/install
+** macOS: https://docs.docker.com/desktop/install/mac-install/
+** Windows (WSL2): https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-containers
+
+. *Docker Compose v2.24+*
++
+Included with Docker Desktop.
+On Linux, install the `docker-compose-plugin` package:
++
+[source,shell]
+----
+sudo apt-get install docker-compose-plugin  # Debian/Ubuntu
+sudo dnf install docker-compose-plugin      # Fedora/RHEL
+----
+
+. Optional, for VS Code workflow: *Dev Containers extension*
++
+Install from the VS Code Marketplace: `ms-vscode-remote.remote-containers`
+
+. Windows only: *WSL2* with a Linux distribution.
++
+See https://learn.microsoft.com/en-us/windows/wsl/install for the full installation guide.
++
+[IMPORTANT]
+All project directories should live inside the WSL2 filesystem (`~/...`), not on the Windows mount (`/mnt/c/...`).
+
+[[quickstart-vscode]]
+== Quick Start: VS Code Dev Container
+
+This is the recommended workflow for interactive daily use.
+
+=== Step 1: Add DocOps Box configuration to your project
+
+If `docopsbox` is installed globally (see <<quickstart-cli>>), run in your project directory:
+
+[source,shell]
+----
+docopsbox init
+----
+
+This downloads `compose.yml`, `.env`, and `.devcontainer/devcontainer.json` into the current directory, prompts for a project slug, and updates `.gitignore` automatically.
+
+Alternatively, download the files manually:
+
+[source,shell]
+----
+# Download into your current project directory
+curl -fsSL {proj_repo_raw}/docopsbox -o docopsbox && chmod +x docopsbox
+./docopsbox init
+----
+
+If you are setting up DocOps Box itself or contributing to it, clone the full repository instead.
+
+=== Step 2: Open in Dev Container
+
+In VS Code, open the Command Palette (kbd:[Ctrl+Shift+P] / kbd:[Cmd+Shift+P]) and run:
+
+ Dev Containers: Reopen in Container
+
+VS Code pulls the pre-built image from Docker Hub (first time only; 2--5 min depending on connection speed) and attaches the editor to the running container at `/workspace`.
+
+==== What Just Happened?
+
+* Docker pulled the `docopslab/box-max:work` image from Docker Hub.
+* A container started with your project directory bind-mounted at `/workspace`.
+* `docops-shell-history` volume attached at `/commandhistory` to persist Zsh history.
+* `docops-{PROJECT_SLUG}-bundle` volume attached at `/usr/local/bundle` to persist installed gems.
+* `postCreateCommand` ran: `gem install bundler`, then `bundle install` (if a `Gemfile` is present), then `npm install` (if `package.json` is present).
+* VS Code connected to the running container.
+Your editor terminal, file edits, and Git operations all execute inside the container.
+
+You can now run `bundle install`, `rhx`, `issuer`, `asciidoctor`, and other tools directly in the VS Code terminal.
+
+[[quickstart-cli]]
+== Quick Start: Terminal / CLI
+
+If you prefer a terminal-only workflow, use the `docopsbox` wrapper script.
+
+=== Step 1: Obtain and install `docopsbox`
+
+If you do not already have the `docopsbox` script and configuration files (see <<quickstart-vscode>> for how to download them), get the script first:
+
+[source,shell]
+----
+curl -fsSL {proj_repo_raw}/docopsbox -o docopsbox
+chmod +x docopsbox
+
+# Optional: make it available from any directory on your system
+sudo ln -s "$(pwd)/docopsbox" /usr/local/bin/docopsbox
+----
+
+You also need `compose.yml` and `.env` in the same directory.
+Download these from the link:{proj_repo_www}[DocOps Box repository] as shown in <<quickstart-vscode>>.
+
+=== Step 2: Configure your project
+
+Edit `.env` and set `PROJECT_SLUG` to a short identifier for your project.
+
+=== Step 3: Start an interactive shell
+
+[source,shell]
+----
+docopsbox run
+----
+
+If you need to attach to a running container instead, use `docopsbox shell`.
+
+Your terminal prompt changes to the container's shell prompt and you are inside the environment at `/workspace`.
+
+Use `exit` to return to your host shell.
+
+==== One-off commands
+
+Run a single command without entering an interactive session:
+
+[source,shell]
+----
+docopsbox exec bundle install
+docopsbox exec rhx 1.2.0 --config _configs/github.yml --md
+----
+
+[[configuration]]
+== Configuration Reference
+
+=== `.env` (committed to Git)
+
+The `.env` file is committed to your repository.
+It contains only safe, non-secret project-specific configuration.
+
+[cols="2,1,3",options="header"]
+|===
+| Variable | Default | Description
+
+| `PROJECT_SLUG`
+| `my-project`
+| Short identifier used to name the per-project gem volume.
+Set this to something unique across your projects.
+
+| `IMAGE_VARIANT`
+| `max`
+| `max` (full toolset, adds Node.js and Python) or `min` (core docs tools: Ruby, Pandoc, Vale, Git).
+Shell environment (Zsh vs Bash) is controlled by `IMAGE_CONTEXT`, not variant.
+
+| `IMAGE_CONTEXT`
+| `work`
+| `work` (interactive, OhMyZsh) or `live` (automation, Bash only).
+
+| `IMAGE_REGISTRY`
+| `docopslab`
+| Docker Hub username or registry prefix for the image.
+
+| `RUBY_VERSION`
+| `{ruby_vrsn_dflt}`
+| Ruby version to use when building the image locally.
+Only relevant if you build the image locally.
+
+| `ADD_NODEJS`
+| `true`
+| Include Node.js in the image.
+
+| `ADD_PYTHON`
+| `true`
+| Include Python in the image.
+
+| `ADD_PANDOC`
+| `true`
+| Include Pandoc in the image.
+
+| `ADD_VALE`
+| `true`
+| Include Vale in the image.
+
+| `ADD_LIBREOFFICE`
+| `false`
+| Include LibreOffice CLI tools in the image.
+|===
+
+=== `.env.local` (gitignored, machine-specific overrides)
+
+Copy the `.env.local` template and uncomment values as needed.
+This file is never committed to Git.
+
+[cols="2,3",options="header"]
+|===
+| Variable | Use
+
+| `HOST_UID`
+| Override the UID used for file ownership inside the container.
+Set to match `id -u` on the host if you see permission errors.
+
+| `HOST_GID`
+| Same as above for group ID (`id -g`).
+
+| `IMAGE_REGISTRY`
+| Override to a private registry or local mirror.
+|===
+
+[[project-slug-resolution]]
+=== PROJECT_SLUG Resolution Order
+
+`docopsbox` resolves `PROJECT_SLUG` in this order when not set in any env file:
+
+. `PROJECT_SLUG` from `.env` or `.env.local`
+. `:this_proj_slug:` AsciiDoc attribute in `README.adoc`
+. `name:` field at the top of `compose.yml`
+. Slugified current directory name (spaces and underscores to hyphens, lowercased)
+
+[[image-variants-contexts]]
+=== Image Variants and Contexts
+
+The image tag format is: `<registry>/box-<variant>:<context>`
+
+For example: `docopslab/box-max:work`
+
+[cols="1,1,3",options="header"]
+|===
+| Setting | Values | Notes
+
+| `IMAGE_VARIANT`
+| `max`, `min`
+| `min` includes Ruby, Bundler, Git, Pandoc, and Vale.
+`max` adds Node.js and Python (and LibreOffice CLI tools in the `work` context).
+
+| `IMAGE_CONTEXT`
+| `work`, `live`
+| `work` configures Zsh with Oh My Zsh for interactive daily use.
+`live` uses Bash only, with no interactive enhancements; suited for CI/CD automation.
+|===
+
+=== `compose.yml`
+
+The `compose.yml` file is the single source of truth for the container structure.
+Both `docopsbox` and `.devcontainer/devcontainer.json` reference it.
+
+Key configuration:
+
+* `env_file:` loads `.env` first, then `.env.local` (`required: false` -- no error if absent)
+* Service name: `docops`; container name: `docopsbox_${PROJECT_SLUG}`
+* Volume names embed `PROJECT_SLUG` for per-project isolation
+* Working directory inside the container: `/workspace`
+
+[[volume-lifecycle]]
+== Volume Lifecycle
+
+DocOps Box uses two named volumes with different lifecycle expectations:
+
+[cols="2,1,2,2",options="header"]
+|===
+| Volume | Type | Mount Point | Notes
+
+| `docops-shell-history`
+| Precious
+| `/commandhistory`
+| Shared across all projects.
+Contains your Zsh history.
+Do not delete without backing up first.
+
+| `docops-<slug>-bundle`
+| Disposable
+| `/usr/local/bundle`
+| Per-project gem cache.
+Safe to recreate at any time; `bundle install` repopulates it.
+|===
+
+=== Volume Management Commands
+
+[cols="2,3",options="header"]
+|===
+| Command | Effect
+
+| `docopsbox status`
+| Show container state and volume sizes.
+
+| `docopsbox clean`
+| Remove the stopped container and keep all volumes.
+
+| `docopsbox reset`
+| Remove the container and the per-project bundle volume; preserve shell history.
+
+| `docopsbox reset --full`
+| Destroy *both* volumes including shell history (requires double confirmation).
+
+| `docopsbox backup-history`
+| Copy shell history volume contents to `backups/` before destructive operations.
+|===
+
+[[docopsbox-reference]]
+== `docopsbox` Command Reference
+
+The `docopsbox` script is a thin Bash wrapper over `docker compose`.
+Every command prints the underlying Docker command before executing, so you can learn or adapt these directly.
+
+[source,shell]
+----
+docopsbox help            # Show usage summary
+docopsbox init            # Bootstrap a new project directory with DocOps Box config files
+docopsbox run             # Start an interactive session in a disposable container
+docopsbox shell           # Enter an interactive shell in the running container
+docopsbox build           # Build the Docker image from Dockerfile (contributor workflow)
+docopsbox exec CMD        # Run CMD in a running container
+docopsbox stop            # Stop the running container
+docopsbox clean           # Remove stopped containers (keep volumes)
+docopsbox reset           # Remove container and gem cache; preserve shell history
+docopsbox reset --full    # Also destroy shell history (double-confirmed)
+docopsbox backup-history  # Back up shell history to backups/
+docopsbox logs            # Tail container logs
+docopsbox list            # List all DocOps Box-managed containers and volumes across projects
+docopsbox status          # Show container state, volume sizes, and image details
+docopsbox doctor          # Diagnose the local Docker setup
+----
+
+=== `docopsbox doctor`
+
+Performs a full diagnostic:
+
+* Docker Engine version and availability
+* Docker Compose version
+* Image presence and tag verification
+* Volume existence and size inspection
+* WSL2 environment detection
+* Actionable error messages for common failure conditions
+
+Run this first when something is not working.
+
+[[troubleshooting]]
+== Troubleshooting
+
+=== Start with `doctor`
+
+[source,shell]
+----
+docopsbox doctor
+----
+
+This covers the most common problems: Docker not running, wrong Compose version, image not built, volumes missing.
+
+=== Common Issues
+
+==== `Error response from daemon: No such image`
+
+The image has not been built or pulled yet.
+
+[source,shell]
+----
+docopsbox build
+----
+
+Or pull the pre-built image from Docker Hub:
+
+[source,shell]
+----
+docker pull docopslab/box-max:work
+----
+
+==== `Error: No such service: docops`
+
+`docopsbox` is not running from the directory containing `compose.yml`.
+Change to the project root and try again.
+
+==== Permission denied writing files on Linux
+
+Files the container writes are owned by the container user, which may differ from your host user.
+Set `HOST_UID` and `HOST_GID` in `.env.local` to match your host user:
+
+[source,shell]
+----
+# Find your host UID and GID
+id -u  # prints your UID
+id -g  # prints your GID
+----
+
+[source,ini]
+----
+# .env.local
+HOST_UID=1001  # replace with output of: id -u
+HOST_GID=1001  # replace with output of: id -g
+----
+
+Then re-run `docopsbox run`.
+A future release will detect and reconcile UID/GID automatically via the container entrypoint, eliminating this step.
+
+==== `bundle install` fails inside the container
+
+The bundle volume may have stale or corrupted gem data.
+Clear and rebuild it:
+
+[source,shell]
+----
+docopsbox reset
+docopsbox run
+# Inside the container:
+bundle install
+----
+
+==== Gems fail to load after updating Ruby version
+
+Native gem extensions (compiled C code inside gems like `nokogiri` or `ffi`) are built against a specific Ruby version.
+If the image's Ruby version changes and you are using a cached gem bundle volume, the extensions will be incompatible.
+
+Clear the bundle volume and reinstall:
+
+[source,shell]
+----
+docopsbox reset
+docopsbox run
+# Inside the container:
+bundle install
+----
+
+If you are not sure which Ruby version the cached bundle was built against, `docopsbox status` shows the current image's Ruby version.
+
+==== VS Code Dev Container fails to start
+
+. Verify Docker is running: `docker info`
+. Validate the Compose file: `docker compose config`
+. Open the Dev Container log: Command Palette → _Dev Containers: Show Container Log_
+
+==== WSL2: very slow file I/O
+
+Ensure your project directory lives inside the WSL2 filesystem (`~/...`), not on the Windows mount (`/mnt/c/...`).
+Windows filesystem mounts have significantly degraded I/O performance under WSL2.
+
+[[extending]]
+== Extending DocOps Box
+
+=== Custom Downstream Dockerfile
+
+Create a `Dockerfile.custom` in your project and reference it from `compose.yml`:
+
+[source,dockerfile]
+----
+ARG IMAGE_CONTEXT=work
+ARG IMAGE_VARIANT=max
+ARG IMAGE_REGISTRY=docopslab
+FROM ${IMAGE_REGISTRY}/box-${IMAGE_VARIANT}:${IMAGE_CONTEXT}
+
+# Additional packages, config, or gem pre-installs here
+RUN apt-get install -y some-package
+----
+
+Update `compose.yml` to use the custom Dockerfile.
+
+[source,yaml]
+----
+services:
+  docops:
+    build:
+      context: .
+      dockerfile: Dockerfile.custom
+      args:
+        IMAGE_CONTEXT: "${IMAGE_CONTEXT:-work}"
+        IMAGE_VARIANT: "${IMAGE_VARIANT:-max}"
+        IMAGE_REGISTRY: "${IMAGE_REGISTRY:-docopslab}"
+----
+
+=== Pre-installing Gems for CI/CD
+
+For pipelines where install speed matters, pre-install gems in a custom image:
+
+[source,dockerfile]
+----
+FROM docopslab/box-min:live
+
+COPY Gemfile Gemfile.lock /workspace/
+RUN cd /workspace && bundle install
+----
+
+=== Additional VS Code Extensions
+
+Edit `.devcontainer/devcontainer.json` and add extension IDs:
+
+[source,json]
+----
+"customizations": {
+  "vscode": {
+    "extensions": [
+      "asciidoctor.asciidoctor-vscode",
+      "eamodio.gitlens",
+      "redhat.vscode-yaml",
+      "your.extension-id"
+    ]
+  }
+}
+----
+
+[[appendix-background]]
+[appendix]
+== Background and Context
+
+=== Why Docker + Compose (Not Just `docker run`)?
+
+Raw `docker run` commands quickly grow unwieldy: volumes, ports, user IDs, environment variables, image tags -- all manually specified each time.
+Docker Compose externalizes all of that into a versioned `compose.yml`, making the run configuration reproducible and shareable in Git.
+
+The earlier `docksh` wrapper served a similar purpose but managed Docker directly, without Compose.
+`docopsbox` keeps the user-friendly wrapper while delegating the structural lifting to Compose.
+
+=== Why Separate `work` and `live` Contexts?
+
+Interactive daily work needs things that automated pipelines do not: Zsh, OhMyZsh, text editors, full terminal tooling.
+Including these in a `live` CI/CD image wastes build time, inflates image size, and introduces unnecessary attack surface.
+Separate contexts keep each image lean and purpose-built.
+
+=== Why Two Volume Types?
+
+Shell history is *precious and slow to accumulate*.
+It represents muscle memory and a searchable record of real commands run on real projects.
+
+Gem bundles are *disposable and fully reproducible*.
+If a bundle volume is corrupted or needs a clean rebuild, `bundle install` regenerates it in minutes.
+
+=== Why `/usr/local/bundle`?
+
+Standard Docker Ruby base images configure `/usr/local/bundle` as the system gem path.
+Using this path means `bundle install` writes gems into the named volume (mounted there), not into the image layer.
+
+=== Why an `ENTRYPOINT` Script?
+
+Docker images deployed to a registry cannot know the UID or GID of the user who will run them.
+Placing UID/GID reconciliation in the image's own `ENTRYPOINT` script -- rather than baking it at build time or requiring a separate file in the user's project -- satisfies all three requirements simultaneously: it runs on every `docker run` or `docker compose run` invocation, works with pre-built registry images, requires no extra files in the user's project directory.
+
+The entrypoint detects the `HOST_UID` and `HOST_GID` environment variables (passed in by `compose.yml`), adjusts the container user's identity to match, then drops privileges and executes the original command (`$CMD` or the default shell).
+On macOS with Docker Desktop, the VM layer provides transparent ownership mapping and the entrypoint is a no-op.
+
+[[beyond-ruby-docops]]
+=== Beyond Ruby DocOps
+
+Despite its Ruby-first focus, DocOps Box is not limited to Ruby tooling.
+All `max` images include:
+
+* *Node.js* and *npm/yarn* -- for JavaScript-based documentation tools (Redocly CLI, Markdownlint, etc.) and static site generators
+* *Python 3* and *pip* -- for Python-based tooling (MkDocs, Sphinx, custom scripts)
+* *Pandoc* -- a universal document converter that bridges formats regardless of their origin toolchain
+* *Vale* -- a prose linter based on configurable style guides, fully independent of Ruby
+
+The `min` images retain Pandoc and Vale alongside Ruby, giving even the smallest image real cross-format and prose-linting capabilities.
+
+If your workflow is entirely Python or Node-based, DocOps Box remains a valid choice:
+the container gives you a pre-configured runtime with correct file ownership and volume-backed persistence.
+Switch `IMAGE_VARIANT` to `max`, point your project at a `requirements.txt` or `package.json`, and the environment is available without any Ruby involvement.
+
+For substantial standalone Python or Node.js documentation pipelines that do not use Ruby at all, dedicated images from those ecosystems may be more appropriate.
+See <<when-to-use>> for guidance.
+
+== Development and Contribution
+
+DocOps Box is maintained by link:https://github.com/DocOps[DocOps Lab].
+
+=== Building Locally
+
+[source,shell]
+----
+# Build max:work image directly
+docker build \
+  --build-arg IMAGE_CONTEXT=work \
+  --build-arg RUBY_VERSION=3.2.7 \
+  -t docopslab/box-max:work \
+  .
+
+# Or via docopsbox wrapper:
+docopsbox build
+----
+
+=== Smoke Tests
+
+[source,shell]
+----
+docker run --rm docopslab/box-max:work ruby --version
+docker run --rm docopslab/box-max:work bundle --version
+docker run --rm docopslab/box-max:work git --version
+----
+
+=== Contributing
+
+. link:{proj_issues_url}[Open an issue] for bug reports or feature proposals.
+. Fork the repository and submit a pull request.
+
+Contributions should:
+
+* Not break the `min:live` CI/CD use case.
+* Not increase `max` image size unnecessarily.
+* Update this README alongside any user-facing changes.
+* Follow the AsciiDoc authoring conventions used throughout this document.

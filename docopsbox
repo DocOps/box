@@ -1,0 +1,645 @@
+#!/usr/bin/env bash
+# docopsbox — DocOps Box workspace manager
+# Thin wrapper around Docker Compose providing a friendly interface for non-developer users. 
+# Always shows the underlying Docker command before running.
+# Run `docopsbox help` for usage information.
+set -euo pipefail
+
+# CONSTANTS
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE_FILE="${SCRIPT_DIR}/compose.yml"
+ENV_FILE="${SCRIPT_DIR}/.env"
+ENV_LOCAL_FILE="${SCRIPT_DIR}/.env.local"
+HISTORY_VOLUME="docops-shell-history"
+DOCOPSBOX_VERSION="0.1.0"
+
+# HELPERS
+
+# tag::universal-style-helpers[]
+_bold() { printf '\033[1m%s\033[0m' "$*"; }
+_green() { printf '\033[32m%s\033[0m' "$*"; }
+_yellow() { printf '\033[33m%s\033[0m' "$*"; }
+_red() { printf '\033[31m%s\033[0m' "$*"; }
+_tick() { printf '%s %s\n' "$(_green '✓')" "$*"; }
+_warn() { printf '%s %s\n' "$(_yellow '⚠')" "$*"; }
+_fail() { printf '%s %s\n' "$(_red '✗')" "$*"; }
+_info() { printf '  %s\n' "$*"; }
+_sep() { printf '%s\n' "────────────────────────────────────────────────"; }
+_run_echo() { printf '\n%s %s\n\n' "$(_bold '▶')" "$(_bold "$*")"; }
+# end::universal-style-helpers[]
+
+# Load .env and optional .env.local into current shell for slug/variant resolution.
+_load_env() {
+  if [[ -f "$ENV_FILE" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+    set +a
+  fi
+  if [[ -f "$ENV_LOCAL_FILE" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$ENV_LOCAL_FILE"
+    set +a
+  fi
+  # Auto-export HOST_UID/HOST_GID from the invoking user's identity on Linux.
+  # .env.local explicit values take precedence (sourced above before this runs).
+  # The container entrypoint reads these at runtime to reconcile file ownership.
+  # On macOS with Docker Desktop, the VM handles ownership transparently; these
+  # values are passed but the entrypoint skips reconciliation when they already match.
+  export HOST_UID="${HOST_UID:-$(id -u)}"
+  export HOST_GID="${HOST_GID:-$(id -g)}"
+}
+
+# Resolve PROJECT_SLUG with 5-tier fallback.
+_resolve_slug() {
+  if [[ -n "${PROJECT_SLUG:-}" ]]; then
+    echo "$PROJECT_SLUG"; return
+  fi
+  # README.adoc :this_proj_slug: attribute
+  local readme="${SCRIPT_DIR}/README.adoc"
+  if [[ -f "$readme" ]]; then
+    local attr
+    attr=$(grep -m1 '^:this_proj_slug:' "$readme" 2>/dev/null | sed 's/:this_proj_slug: *//' | tr -d '[:space:]')
+    if [[ -n "$attr" ]]; then echo "$attr"; return; fi
+  fi
+  # compose.yml name:
+  if [[ -f "$COMPOSE_FILE" ]]; then
+    local cname
+    cname=$(grep -m1 '^name:' "$COMPOSE_FILE" 2>/dev/null | sed 's/name: *//' | tr -d '[:space:]')
+    if [[ -n "$cname" && "$cname" != "docops-box" ]]; then echo "$cname"; return; fi
+  fi
+  # Fallback: slugified directory name
+  basename "$SCRIPT_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//'
+}
+
+# Run a compose command, printing it first for transparency.
+_compose() {
+  _run_echo "docker compose $*"
+  docker compose --file "$COMPOSE_FILE" "$@"
+}
+
+# Check Docker is running.
+_require_docker() {
+  if ! docker info > /dev/null 2>&1; then
+    _fail "Docker is not running."
+    _info "Start Docker Desktop (or the Docker daemon on Linux) and try again."
+    _info "Run '$(_bold 'docopsbox doctor')' to diagnose your environment."
+    exit 1
+  fi
+}
+
+# Confirm a destructive action. Usage: _confirm "prompt text"
+_confirm() {
+  printf '%s [y/N] ' "$(_yellow "$1")"
+  read -r reply
+  [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# Fetch a URL to stdout; tries curl then wget.
+_fetch() {
+  if command -v curl > /dev/null 2>&1; then
+    curl -fsSL "$1"
+  elif command -v wget > /dev/null 2>&1; then
+    wget -qO- "$1"
+  else
+    _fail "Neither curl nor wget found. Install one and try again."
+    exit 1
+  fi
+}
+
+# COMMANDS
+
+cmd_init() {
+  local target_dir="$PWD"
+  local upstream_raw="https://raw.githubusercontent.com/DocOps/box/latest"
+
+  printf '\n%s\n' "$(_bold 'DocOps Box Init')"
+  _sep
+  _info "Target directory: $target_dir"
+  printf '\n'
+
+  # Warn about any files that would be overwritten
+  local existing=()
+  for f in compose.yml .env .devcontainer/devcontainer.json; do
+    [[ -f "$target_dir/$f" ]] && existing+=("$f")
+  done
+  if [[ ${#existing[@]} -gt 0 ]]; then
+    _warn "The following files already exist:"
+    for f in "${existing[@]}"; do _info "  $f"; done
+    printf '\n'
+    if ! _confirm "Overwrite existing files?"; then
+      printf 'Init cancelled. No files changed.\n'
+      exit 0
+    fi
+  fi
+
+  # Prompt for PROJECT_SLUG (default: slugified directory name)
+  local default_slug
+  default_slug=$(basename "$target_dir" | tr '[:upper:]' '[:lower:]' | \
+    sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//')
+  printf '\n%s ' "$(_bold "Project slug [$default_slug]:")"  
+  read -r input_slug
+  local slug="${input_slug:-$default_slug}"
+
+  printf '\n'
+  _info "Downloading configuration files..."
+
+  # Download each file, reporting inline pass/fail
+  local dl_ok=true
+  for file in compose.yml .env; do
+    printf '  %-40s' "$file"
+    if _fetch "$upstream_raw/$file" > "$target_dir/$file" 2>/dev/null; then
+      printf '%s\n' "$(_green 'OK')"
+    else
+      printf '%s\n' "$(_red 'FAILED')"
+      dl_ok=false
+    fi
+  done
+
+  mkdir -p "$target_dir/.devcontainer"
+  printf '  %-40s' ".devcontainer/devcontainer.json"
+  if _fetch "$upstream_raw/.devcontainer/devcontainer.json" \
+      > "$target_dir/.devcontainer/devcontainer.json" 2>/dev/null; then
+    printf '%s\n' "$(_green 'OK')"
+  else
+    printf '%s\n' "$(_red 'FAILED')"
+    dl_ok=false
+  fi
+
+  if [[ "$dl_ok" == false ]]; then
+    _fail "One or more files could not be downloaded."
+    _info "Check your internet connection and try again."
+    exit 1
+  fi
+
+  # Patch PROJECT_SLUG into .env (portable: temp-file sed, works on Linux and macOS)
+  local tmpfile; tmpfile=$(mktemp)
+  sed "s/^PROJECT_SLUG=.*/PROJECT_SLUG=${slug}/" "$target_dir/.env" > "$tmpfile" && \
+    mv "$tmpfile" "$target_dir/.env"
+
+  # Add standard DocOps Box entries to .gitignore if not already present
+  local gitignore="$target_dir/.gitignore"
+  local new_entries=(".env.local" "backups/")
+  local added=()
+  for entry in "${new_entries[@]}"; do
+    if [[ -f "$gitignore" ]] && grep -qF "$entry" "$gitignore" 2>/dev/null; then
+      continue
+    fi
+    printf '%s\n' "$entry" >> "$gitignore"
+    added+=("$entry")
+  done
+  if [[ ${#added[@]} -gt 0 ]]; then
+    _tick ".gitignore updated (added: ${added[*]})"
+  else
+    _tick ".gitignore already up to date"
+  fi
+
+  # Source the freshly written .env so IMAGE_VARIANT/IMAGE_CONTEXT are available below
+  set -a
+  # shellcheck source=/dev/null
+  source "$target_dir/.env" 2>/dev/null || true
+  set +a
+
+  printf '\n'
+  _tick "Project initialized: $(_bold "$slug")"
+  _sep
+  printf '\n%s\n\n' "$(_bold 'Next steps:')"
+  _info "1. Pull the Docker image:"
+  _info "   $(_bold "docker pull ${IMAGE_REGISTRY:-docopslab}/box-${IMAGE_VARIANT:-max}:${IMAGE_CONTEXT:-work}")"
+  printf '\n'
+  _info "2. Start your environment:"
+  _info "   $(_bold 'docopsbox run')   — interactive terminal session"
+  _info "   VS Code: Command Palette → $(_bold 'Dev Containers: Reopen in Container')"
+  printf '\n'
+  _info "3. Commit to Git:  compose.yml  .env  .devcontainer/"
+  _info "   Never commit .env.local (it is in .gitignore)."
+  printf '\n'
+}
+
+cmd_run() {
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  _compose run --rm docops
+}
+
+cmd_build() {
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  _compose build docops
+  printf '\n%s\n' "$(_tick "Build complete. Run '$(_bold 'docopsbox shell')' to enter the environment.")"
+}
+
+cmd_shell() {
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  # Start the container if not running, then exec an interactive shell.
+  if ! docker compose --file "$COMPOSE_FILE" ps --services --filter status=running 2>/dev/null | grep -q '^docops$'; then
+    _compose up -d docops
+  fi
+  _run_echo "docker compose exec docops zsh"
+  docker compose --file "$COMPOSE_FILE" exec docops zsh
+}
+
+cmd_exec() {
+  if [[ $# -eq 0 ]]; then
+    _fail "Usage: docopsbox exec <command> [args...]"
+    exit 1
+  fi
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  _compose exec docops "$@"
+}
+
+cmd_stop() {
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  _compose stop docops
+  _tick "Container stopped. Volumes preserved. Run '$(_bold 'docopsbox shell')' to resume."
+}
+
+cmd_clean() {
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  _compose rm --stop --force docops
+  _tick "Stopped containers removed. Volumes preserved."
+}
+
+cmd_reset() {
+  local full=false
+  if [[ "${1:-}" == "--full" ]]; then full=true; fi
+
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+
+  local bundle_vol="docops-${slug}-bundle"
+
+  if [[ "$full" == true ]]; then
+    _warn "FULL RESET: This will delete the container, dependency cache, AND your shell history."
+    _warn "Shell history ($HISTORY_VOLUME) cannot be recovered after this operation."
+    if ! _confirm "Are you sure you want to delete everything, including shell history?"; then
+      printf 'Reset cancelled.\n'; exit 0
+    fi
+    if ! _confirm "Double-confirm: delete shell history volume '$HISTORY_VOLUME'?"; then
+      printf 'Reset cancelled.\n'; exit 0
+    fi
+    cmd_clean 2>/dev/null || true
+    _run_echo "docker volume rm $bundle_vol $HISTORY_VOLUME"
+    docker volume rm "$bundle_vol" "$HISTORY_VOLUME" 2>/dev/null || true
+    _tick "Full reset complete. All volumes removed."
+  else
+    _warn "Reset will remove the container and dependency cache ($bundle_vol)."
+    _warn "Shell history ($HISTORY_VOLUME) will be preserved."
+    if ! _confirm "Proceed with reset?"; then
+      printf 'Reset cancelled.\n'; exit 0
+    fi
+    cmd_clean 2>/dev/null || true
+    _run_echo "docker volume rm $bundle_vol"
+    docker volume rm "$bundle_vol" 2>/dev/null || true
+    _tick "Reset complete. Dependency cache cleared. Shell history preserved."
+    _info "Run '$(_bold 'docopsbox shell')' to start fresh (gems will reinstall on first run)."
+  fi
+}
+
+cmd_backup_history() {
+  _require_docker
+  local backup_dir="${SCRIPT_DIR}/backups"
+  local date_str; date_str=$(date +%Y%m%d-%H%M%S)
+  local outfile="${backup_dir}/zsh_history_${date_str}.txt"
+
+  mkdir -p "$backup_dir"
+  printf 'Exporting shell history from volume %s...\n' "$HISTORY_VOLUME"
+  _run_echo "docker run --rm -v $HISTORY_VOLUME:/data alpine cat /data/.zsh_history"
+  if docker run --rm -v "${HISTORY_VOLUME}:/data" alpine cat /data/.zsh_history > "$outfile" 2>/dev/null; then
+    _tick "Shell history saved to: $outfile"
+  else
+    _fail "Could not export history. Is the volume '$HISTORY_VOLUME' present?"
+    _info "Check with: $(_bold 'docopsbox status')"
+    exit 1
+  fi
+}
+
+cmd_logs() {
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  _compose logs --tail=50 docops
+}
+
+cmd_list() {
+  _require_docker
+
+  printf '\n%s\n' "$(_bold 'DocOps Box: All Managed Projects')"
+  _sep
+
+  printf '%s\n' "$(_bold 'Containers:')"
+  local container_found=false
+  while IFS='|' read -r name status project_slug; do
+    [[ -z "$name" ]] && continue
+    container_found=true
+    if [[ "$status" == *"Up"* ]]; then
+      _tick "$(printf '%-36s %-10s  project: %s' "$name" "running" "$project_slug")"
+    else
+      _warn "$(printf '%-36s %-10s  project: %s' "$name" "stopped" "$project_slug")"
+    fi
+  done < <(docker ps -a \
+    --filter "label=docopsbox.managed=true" \
+    --format '{{.Names}}|{{.Status}}|{{.Label "docopsbox.project_slug"}}' 2>/dev/null)
+  [[ "$container_found" == false ]] && _info "(none found)"
+
+  printf '\n'
+  printf '%s\n' "$(_bold 'Volumes:')"
+  local volume_found=false
+  while IFS= read -r vol; do
+    [[ -z "$vol" ]] && continue
+    volume_found=true
+    local sz disposition
+    sz=$(docker run --rm -v "${vol}:/data" alpine du -sh /data 2>/dev/null | awk '{print $1}' || echo "?")
+    if [[ "$vol" == "docops-shell-history" ]]; then
+      disposition="precious (shared across all projects)"
+    else
+      disposition="disposable"
+    fi
+    _tick "$(printf '%-42s %-8s  %s' "$vol" "$sz" "$disposition")"
+  done < <(docker volume ls --format '{{.Name}}' 2>/dev/null | grep '^docops-')
+  [[ "$volume_found" == false ]] && _info "(none found)"
+
+  printf '\n'
+}
+
+cmd_status() {
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  local bundle_vol="docops-${slug}-bundle"
+
+  printf '\n%s\n' "$(_bold 'DocOps Box Status')"
+  _sep
+  printf '%-28s %s\n' "PROJECT_SLUG:" "$slug"
+  printf '%-28s %s\n' "IMAGE_VARIANT:" "${IMAGE_VARIANT:-max}"
+  printf '%-28s %s\n' "IMAGE_CONTEXT:" "${IMAGE_CONTEXT:-work}"
+  printf '%-28s %s\n' "RUBY_VERSION:" "${RUBY_VERSION:-3.2.7}"
+  _sep
+
+  # Container
+  local state
+  state=$(docker compose --file "$COMPOSE_FILE" ps --status 2>/dev/null | grep 'docops' | awk '{print $NF}' || echo "not found")
+  if [[ "$state" == "running" ]]; then
+    _tick "Container: running"
+  elif [[ "$state" == "exited" ]]; then
+    _warn "Container: stopped (run 'docopsbox shell' to start)"
+  else
+    _warn "Container: not created"
+  fi
+
+  _sep
+  printf '%s\n' "$(_bold 'Volumes:')"
+
+  # Shell history
+  local hist_size
+  if docker volume inspect "$HISTORY_VOLUME" > /dev/null 2>&1; then
+    hist_size=$(docker run --rm -v "${HISTORY_VOLUME}:/data" alpine du -sh /data 2>/dev/null | awk '{print $1}' || echo "?")
+    _tick "$(printf '%-40s %s  %s' "$HISTORY_VOLUME" "$hist_size" "(precious)")"
+  else
+    _warn "$(printf '%-40s %s' "$HISTORY_VOLUME" "not yet created")"
+  fi
+
+  # Bundle cache
+  if docker volume inspect "$bundle_vol" > /dev/null 2>&1; then
+    local bund_size
+    bund_size=$(docker run --rm -v "${bundle_vol}:/data" alpine du -sh /data 2>/dev/null | awk '{print $1}' || echo "?")
+    _tick "$(printf '%-40s %s  %s' "$bundle_vol" "$bund_size" "(disposable)")"
+  else
+    _warn "$(printf '%-40s %s' "$bundle_vol" "not yet created")"
+  fi
+  printf '\n'
+}
+
+cmd_doctor() {
+  printf '\n%s\n' "$(_bold 'Diagnosing DocOps Box environment...')"
+  _sep
+
+  local errors=0 warnings=0
+
+  # OS detection
+  local os_label
+  if [[ -f /etc/os-release ]]; then
+    os_label=$(. /etc/os-release && echo "$PRETTY_NAME")
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    os_label="macOS $(sw_vers -productVersion 2>/dev/null || echo '')"
+  else
+    os_label="$(uname -s)"
+  fi
+  # WSL detection
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    os_label="${os_label} (via WSL2)"
+    local wsl2=true
+  else
+    local wsl2=false
+  fi
+  _tick "Operating system: $os_label"
+
+  # Docker daemon
+  if docker info > /dev/null 2>&1; then
+    local docker_ver
+    docker_ver=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "unknown")
+    _tick "Docker is running (version $docker_ver)"
+  else
+    _fail "Docker daemon is not reachable."
+    if [[ "$wsl2" == true ]]; then
+      _info "Fix: Open Docker Desktop → Settings → Resources → WSL Integration"
+      _info "     Enable integration for your WSL2 distribution, then restart Docker Desktop."
+    else
+      _info "Fix: Start Docker Desktop (or run 'sudo systemctl start docker' on Linux)."
+    fi
+    errors=$((errors + 1))
+  fi
+
+  # Docker Compose
+  if docker compose version > /dev/null 2>&1; then
+    local compose_ver
+    compose_ver=$(docker compose version --short 2>/dev/null || echo "unknown")
+    _tick "Docker Compose available (version $compose_ver)"
+  else
+    _fail "Docker Compose (v2) not found."
+    _info "Fix: Update Docker Desktop, or install the Compose plugin:"
+    _info "     https://docs.docker.com/compose/install/"
+    errors=$((errors + 1))
+  fi
+
+  # Git
+  if command -v git > /dev/null 2>&1; then
+    local git_ver; git_ver=$(git --version | awk '{print $3}')
+    _tick "Git installed ($git_ver)"
+  else
+    _warn "Git not found natively (not required, but useful)."
+    warnings=$((warnings + 1))
+  fi
+
+  # compose.yml present
+  if [[ -f "$COMPOSE_FILE" ]]; then
+    _tick "compose.yml found"
+  else
+    _fail "compose.yml not found at $COMPOSE_FILE"
+    _info "Fix: You may be running docopsbox from the wrong directory."
+    errors=$((errors + 1))
+  fi
+
+  # .env present
+  if [[ -f "$ENV_FILE" ]]; then
+    _tick ".env found"
+  else
+    _warn ".env not found; using built-in defaults."
+    _info "Tip: Copy .env.example to .env and set PROJECT_SLUG."
+    warnings=$((warnings + 1))
+  fi
+
+  # PROJECT_SLUG
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  _tick "PROJECT_SLUG: $slug ($(
+    if [[ -n "${PROJECT_SLUG:-}" ]]; then echo "from .env"
+    elif grep -qm1 '^:this_proj_slug:' "${SCRIPT_DIR}/README.adoc" 2>/dev/null; then echo "from README.adoc"
+    else echo "from directory name fallback"; fi
+  ))"
+
+  # Image availability
+  local image="${IMAGE_REGISTRY:-docopslab}/box-${IMAGE_VARIANT:-max}:${IMAGE_CONTEXT:-work}"
+  if docker image inspect "$image" > /dev/null 2>&1; then
+    _tick "Image found: $image"
+  else
+    _warn "Image '$image' not found locally."
+    _info "Tip: Pull with: $(_bold "docker pull $image")"
+    _info "     Or build locally with: $(_bold 'docopsbox build')"
+    warnings=$((warnings + 1))
+  fi
+
+  # Volumes
+  local bundle_vol="docops-${slug}-bundle"
+  _sep
+  printf '%s\n' "$(_bold 'Volumes:')"
+  for vol in "$HISTORY_VOLUME" "$bundle_vol"; do
+    if docker volume inspect "$vol" > /dev/null 2>&1; then
+      local sz
+      sz=$(docker run --rm -v "${vol}:/data" alpine du -sh /data 2>/dev/null | awk '{print $1}' || echo "?")
+      _tick "$(printf '%-42s %s' "$vol" "$sz")"
+    else
+      _warn "$(printf '%-42s %s' "$vol" "not yet created (will be created on first run)")"
+    fi
+  done
+
+  # WSL2-specific: Docker socket accessible
+  if [[ "$wsl2" == true ]]; then
+    _sep
+    printf '%s\n' "$(_bold 'WSL2 checks:')"
+    if [[ -S /var/run/docker.sock ]]; then
+      _tick "Docker socket accessible from WSL2"
+    else
+      _fail "Docker socket not accessible from WSL2."
+      _info "Fix: Open Docker Desktop → Settings → Resources → WSL Integration"
+      _info "     Enable integration for your WSL2 distribution."
+      errors=$((errors + 1))
+    fi
+  fi
+
+  _sep
+  if [[ $errors -gt 0 ]]; then
+    _fail "Not ready ($errors error(s), $warnings warning(s))"
+    exit 1
+  elif [[ $warnings -gt 0 ]]; then
+    _warn "Ready with $warnings warning(s)"
+  else
+    _tick "All systems operational"
+  fi
+  printf '\n'
+}
+
+# HELP
+
+cmd_help() {
+  cat <<EOF
+
+$(_bold 'docopsbox') DocOps Box workspace manager (v${DOCOPSBOX_VERSION})
+
+$(_bold 'Usage:')
+  docopsbox <command> [options]
+
+$(_bold 'Setup commands:')
+  $(_bold 'init')           Bootstrap a project directory with DocOps Box config files
+
+$(_bold 'Workspace commands:')
+  $(_bold 'run')            Start an interactive session (new container, removed on exit)
+  $(_bold 'shell')          Enter an interactive shell in the running container
+  $(_bold 'exec') <cmd>     Run a command inside the container
+  $(_bold 'stop')           Stop the container without removing volumes
+  $(_bold 'build')          Build the Docker image from the local Dockerfile
+
+$(_bold 'Management commands:')
+  $(_bold 'list')           List all DocOps Box-managed containers and volumes
+  $(_bold 'status')         Show container state, volume sizes, and project configuration
+  $(_bold 'doctor')         Diagnose environment issues (start here if something goes wrong)
+  $(_bold 'clean')          Remove stopped containers (keep all volumes)
+  $(_bold 'reset')          Remove container and gem cache; preserve shell history
+  $(_bold 'reset --full')   Remove container and ALL volumes including shell history (warns twice)
+  $(_bold 'backup-history') Export shell history to ./backups/ before risky operations
+  $(_bold 'logs')           Show recent container logs
+
+$(_bold 'Configuration:')
+  Edit $(_bold '.env') for project settings (PROJECT_SLUG, IMAGE_VARIANT, RUBY_VERSION, etc.)
+  Create $(_bold '.env.local') (gitignored) for machine-specific overrides (HOST_UID, HOST_GID).
+
+$(_bold 'Examples:')
+  docopsbox init                   # Set up a new project (downloads config files)
+  docopsbox run                    # Enter the working environment
+  docopsbox exec bundle exec jekyll build
+  docopsbox list                   # See all managed projects and volumes
+  docopsbox doctor                 # Diagnose problems
+  docopsbox reset                  # Clear gem cache, keep history
+  docopsbox backup-history         # Save history before a full reset
+
+EOF
+}
+
+# DISPATCH
+
+COMMAND="${1:-help}"
+shift || true
+
+case "$COMMAND" in
+  init)            cmd_init "$@" ;;
+  run)             cmd_run "$@" ;;
+  build)           cmd_build "$@" ;;
+  shell)           cmd_shell "$@" ;;
+  exec)            cmd_exec "$@" ;;
+  stop)            cmd_stop "$@" ;;
+  clean)           cmd_clean "$@" ;;
+  reset)           cmd_reset "$@" ;;
+  backup-history)  cmd_backup_history "$@" ;;
+  logs)            cmd_logs "$@" ;;
+  list)            cmd_list "$@" ;;
+  status)          cmd_status "$@" ;;
+  doctor)          cmd_doctor "$@" ;;
+  help|--help|-h)  cmd_help ;;
+  --version|-v)    printf 'docopsbox %s\n' "$DOCOPSBOX_VERSION" ;;
+  *)
+    _fail "Unknown command: $COMMAND"
+    _info "Run '$(_bold 'docopsbox help')' for usage."
+    exit 1
+    ;;
+esac

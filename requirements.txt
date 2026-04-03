@@ -1,0 +1,3 @@
+# requirements.txt — Python dependencies placeholder
+# Add Python package requirements here, one per line, when building a
+# project-specific image that extends DocOps Box.
