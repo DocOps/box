@@ -1,0 +1,29 @@
+// This is the DocOps Box repo's own Dev Container config.
+// Prime template: templates/.devcontainer/devcontainer.json
+{
+  "name": "DocOps Box",
+  "dockerComposeFile": "../.config/docopsbox.yml",
+  "service": "docops",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "appuser",
+  "postCreateCommand": "gem install bundler 2>/dev/null || true && ([ -f Gemfile ] && bundle install || true) && ([ -f package.json ] && npm install || true) && ([ -f requirements.txt ] && pip install -r requirements.txt || true)",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "asciidoctor.asciidoctor-vscode",
+        "eamodio.gitlens",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "asciidoc.pdf.engine": "asciidoctor-pdf"
+      }
+    }
+  },
+  "remoteEnv": {
+    "HOST_UID": "${localEnv:HOST_UID}",
+    "HOST_GID": "${localEnv:HOST_GID}",
+    "RUN_USER": "appuser"
+  },
+  "shutdownAction": "stopCompose"
+}

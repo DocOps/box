@@ -1,0 +1,11 @@
+{
+  "name": "test-astro-site",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "astro build"
+  },
+  "dependencies": {
+    "astro": "^5.0.0"
+  }
+}

@@ -1,0 +1,1959 @@
+#!/usr/bin/env bash
+# dxbx: DocOps Box workspace manager
+# Thin wrapper around Docker Compose providing a friendly interface for non-developer users.
+#
+# The only non-standard UNIX/Linux dependencies for this are:
+#  - curl (nearly standard)
+#  - Docker Engine
+#  - VS Code (Optional but relatively central)
+#
+# Run `dxbx help` for usage information.
+set -euo pipefail
+
+# CONSTANTS
+# tag::universal-resolve-script-dir[]
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# end::universal-resolve-script-dir[]
+# COMPOSE_FILE, ENV_FILE, and ENV_LOCAL_FILE are always relative to the user's
+# project directory (CWD), not to the location of this script. This means the
+# installed copy (~/.local/bin/dxbx) and a local copy both work the
+# same way: run dxbx from your project directory after `dxbx init`.
+#
+# Canonical compose file path; used in resolution, messages, and init.
+COMPOSE_FILE_CANONICAL="${PWD}/.config/docopsbox.yml"
+#
+# COMPOSE_FILE resolution (first match wins):
+#   1. $COMPOSE_FILE already set in shell; lets teams point at a custom file.
+#      e.g. `COMPOSE_FILE=./compose.yml dxbx up` or `export COMPOSE_FILE=...`
+#   2. .config/docopsbox.yml  : canonical location, created by dxbx init.
+#   3. .docopsbox.yml         : hidden-file alternative at project root.
+if [[ -z "${COMPOSE_FILE:-}" ]]; then
+  if [[ -f "${PWD}/.docopsbox.yml" && ! -f "$COMPOSE_FILE_CANONICAL" ]]; then
+    COMPOSE_FILE="${PWD}/.docopsbox.yml"
+  else
+    COMPOSE_FILE="$COMPOSE_FILE_CANONICAL"
+  fi
+fi
+# .env and .env.local live in .config/ alongside docopsbox.yml.
+# Most config files are co-located; project root stays clean.
+ENV_FILE="${PWD}/.config/.env"
+ENV_LOCAL_FILE="${PWD}/.config/.env.local"
+HISTORY_VOLUME="docops-shell-history"
+DOCOPSBOX_VERSION="0.1.0"
+
+# MATRIX CONSTANTS
+# Source of truth for supported variants, contexts, and Ruby versions.
+# build-matrix.sh sources this file to pick these up rather than duplicating them.
+# tag::dxbx-matrix-constants[]
+DXBX_PRIMARY_RUBY="3.3"              # receives the unversioned tag alias
+DXBX_RUBY_VERSIONS=("3.3" "3.4")    # officially tested/published versions
+DXBX_VARIANTS=("max" "min")          # max = full toolchain; min = Pandoc + Vale only
+DXBX_CONTEXTS=("work" "live")        # work = interactive Zsh; live = minimal, for CI
+# end::dxbx-matrix-constants[]
+
+# Capture original args before any shift, for use in sg-based re-exec.
+_DXBX_ORIG_ARGS=("$@")
+
+# Runtime display settings (defaults); overridden by x-docopsbox in docopsbox.yml.
+DXBX_SHOW_COMMANDS=true
+DXBX_SHOW_WARNINGS=true
+
+# HELPERS
+
+# tag::universal-style-helpers[]
+_bold() { printf '\033[1m%s\033[0m' "$*"; }
+_green() { printf '\033[32m%s\033[0m' "$*"; }
+_yellow() { printf '\033[33m%s\033[0m' "$*"; }
+_red() { printf '\033[31m%s\033[0m' "$*"; }
+_tick() { printf '%s %s\n' "$(_green '✓')" "$*"; }
+_warn() { [[ "${DXBX_SHOW_WARNINGS:-true}" == true ]] && printf '%s %s\n' "$(_yellow '⚠')" "$*"; }
+_fail() { printf '%s %s\n' "$(_red '✗')" "$*"; }
+_info() { printf '  %s\n' "$*"; }
+_sep() { printf '%s\n' "────────────────────────────────────────────────"; }
+_run_echo() { [[ "${DXBX_SHOW_COMMANDS:-true}" == true ]] && printf '\n%s %s\n\n' "$(_bold '▶')" "$(_bold "$*")"; }
+# end::universal-style-helpers[]
+
+# Read settings from x-docopsbox in docopsbox.yml using docker compose config.
+# Runs only when a compose file exists. Uses --format json + grep/sed so there
+# is no dependency on jq, python, or yq. The schema we define and control, so
+# fixed-path grep against the JSON output is safe and reliable.
+# Caches the JSON in DXBX_COMPOSE_JSON so callers can re-use it without a
+# second docker compose invocation.
+DXBX_COMPOSE_JSON=""
+_read_compose_ext() {
+  [[ -f "$COMPOSE_FILE" ]] || return 0
+  # docker compose config needs the project env to interpolate correctly;
+  # run only after COMPOSE_FILE and basic env vars are set.
+  DXBX_COMPOSE_JSON=$(docker compose --file "$COMPOSE_FILE" config --format json 2>/dev/null || true)
+  [[ -z "$DXBX_COMPOSE_JSON" ]] && return 0
+
+  # _ext_bool KEY DEFAULT # extract a boolean at a known JSON key name.
+  # Greps the full JSON output for the key. Safe because we define the schema
+  # and these keys only appear inside the x-docopsbox extension block.
+  _ext_bool() {
+    local key="$1" default="$2"
+    local val
+    val=$(printf '%s' "$DXBX_COMPOSE_JSON" \
+      | grep -o "\"${key}\"[[:space:]]*:[[:space:]]*[a-z]*" \
+      | tail -1 \
+      | grep -o 'true\|false' || true)
+    printf '%s' "${val:-$default}"
+  }
+
+  DXBX_SHOW_COMMANDS=$(_ext_bool 'show_commands' 'true')
+  DXBX_SHOW_WARNINGS=$(_ext_bool 'show_warnings' 'true')
+}
+
+# Print per-command usage and exit if --help or -h is the first argument.
+# Usage: _check_help "$1" "command-name" "one-line description" "usage line(s)"
+_check_help() {
+  [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] || return 0
+  local cmd="$2" desc="$3"; shift 3
+  printf '\n%s # %s\n\n' "$(_bold "dxbx $cmd")" "$desc"
+  printf '%s\n' "$(_bold 'Usage:')"
+  for line in "$@"; do printf '  %s\n' "$line"; done
+  printf '\n'
+  exit 0
+}
+
+# Read a single key from a .env file without executing anything.
+# Usage: _env_key KEY [file]  # reads from ENV_FILE if file omitted.
+# Strips surrounding single or double quotes from the value.
+_env_key() {
+  local key="$1" file="${2:-$ENV_FILE}"
+  [[ -f "$file" ]] || return 0
+  local val
+  val=$(grep -m1 "^${key}=" "$file" | cut -d= -f2-)
+  val="${val%\"}" ; val="${val#\"}"
+  val="${val%\'}" ; val="${val#\'}"
+  printf '%s' "$val"
+}
+
+# Load required variables from .env / .env.local into the current shell.
+# Only extracts the specific keys dxbx needs; never evals or sources the file.
+# Shell-level values of IMAGE_CONTEXT, IMAGE_VARIANT, and IMAGE_REGISTRY take
+# precedence, so callers can override per-invocation:
+#   IMAGE_CONTEXT=live dxbx ex bundle exec rake test
+_load_env() {
+  # Snapshot any shell-level overrides before we might clobber them.
+  local _pre_ctx="${IMAGE_CONTEXT+set}"
+  local _pre_var="${IMAGE_VARIANT+set}"
+  local _pre_reg="${IMAGE_REGISTRY+set}"
+  local _pre_ruby="${RUBY_VERSION+set}"
+  local _ctx="${IMAGE_CONTEXT:-}" _var="${IMAGE_VARIANT:-}" _reg="${IMAGE_REGISTRY:-}" _ruby="${RUBY_VERSION:-}"
+
+  # Read each key from .env, then let .env.local override.
+  for _file in "$ENV_FILE" "$ENV_LOCAL_FILE"; do
+    [[ -f "$_file" ]] || continue
+    local _v
+    _v=$(_env_key PROJECT_SLUG  "$_file"); [[ -n "$_v" ]] && export PROJECT_SLUG="$_v"
+    _v=$(_env_key IMAGE_VARIANT "$_file"); [[ -n "$_v" ]] && export IMAGE_VARIANT="$_v"
+    _v=$(_env_key IMAGE_CONTEXT "$_file"); [[ -n "$_v" ]] && export IMAGE_CONTEXT="$_v"
+    _v=$(_env_key IMAGE_REGISTRY "$_file"); [[ -n "$_v" ]] && export IMAGE_REGISTRY="$_v"
+    _v=$(_env_key RUBY_VERSION  "$_file"); [[ -n "$_v" ]] && export RUBY_VERSION="$_v"
+    _v=$(_env_key HOST_UID      "$_file"); [[ -n "$_v" ]] && export HOST_UID="$_v"
+    _v=$(_env_key HOST_GID      "$_file"); [[ -n "$_v" ]] && export HOST_GID="$_v"
+  done
+
+  # Restore shell-level overrides if they were set before sourcing.
+  [[ -n "$_pre_ctx" ]] && export IMAGE_CONTEXT="$_ctx"
+  [[ -n "$_pre_var" ]] && export IMAGE_VARIANT="$_var"
+  [[ -n "$_pre_reg" ]] && export IMAGE_REGISTRY="$_reg"
+  [[ -n "$_pre_ruby" ]] && export RUBY_VERSION="$_ruby"
+
+  # Compute IMAGE_TAG: the Docker tag component combining IMAGE_CONTEXT and RUBY_VERSION.
+  # IMAGE_TAG is what compose uses for the image: field. IMAGE_CONTEXT stays clean so it
+  # can be passed into the container runtime without embedding the Ruby version suffix.
+  #   work         (no RUBY_VERSION set; resolves to the primary/unversioned alias)
+  #   work-3.4     (RUBY_VERSION=3.4 set in shell, .env, or .env.local)
+  local _ctx_now="${IMAGE_CONTEXT:-work}"
+  if [[ -n "${RUBY_VERSION:-}" ]]; then
+    export IMAGE_TAG="${_ctx_now}-${RUBY_VERSION}"
+  else
+    export IMAGE_TAG="$_ctx_now"
+  fi
+
+  # Auto-export HOST_UID/HOST_GID from the invoking user's identity on Linux.
+  # .env.local explicit values take precedence (sourced above before this runs).
+  # The container entrypoint reads these at runtime to reconcile file ownership.
+  # On macOS with Docker Desktop, the VM handles ownership transparently; these
+  # values are passed but the entrypoint skips reconciliation when they already match.
+  export HOST_UID="${HOST_UID:-$(id -u)}"
+  export HOST_GID="${HOST_GID:-$(id -g)}"
+}
+
+# Resolve PROJECT_SLUG with 5-tier fallback.
+_resolve_slug() {
+  if [[ -n "${PROJECT_SLUG:-}" ]]; then
+    echo "$PROJECT_SLUG"; return
+  fi
+  # README.adoc :this_proj_slug: attribute; look in project dir (PWD), not
+  # the script location (which may be ~/.local/bin for installed copies).
+  local readme="${PWD}/README.adoc"
+  if [[ -f "$readme" ]]; then
+    local attr
+    attr=$(grep -m1 '^:this_proj_slug:' "$readme" 2>/dev/null | sed 's/:this_proj_slug: *//' | tr -d '[:space:]')
+    if [[ -n "$attr" ]]; then echo "$attr"; return; fi
+  fi
+  # Fallback: slugified project directory name (always use PWD, not SCRIPT_DIR)
+  basename "$PWD" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//'
+}
+
+# Emit the canonical --build-arg list for a given variant.
+# Output: one KEY=VALUE per line; consumed by cmd_build via a while-read loop.
+# This is the canonical source for variant definitions; build-matrix.sh sources it.
+# Usage: _variant_build_args max|min
+# tag::dxbx-variant-build-args[]
+_variant_build_args() {
+  case "$1" in
+    max)
+      printf '%s\n' \
+        "ADD_NODEJS=true" \
+        "ADD_PYTHON=true" \
+        "ADD_PANDOC=true" \
+        "ADD_VALE=true" \
+        "ADD_OPENAPI_TOOLS=true" \
+        "ADD_LIBREOFFICE=true"
+      ;;
+    min)
+      printf '%s\n' \
+        "ADD_NODEJS=false" \
+        "ADD_PYTHON=false" \
+        "ADD_PANDOC=true" \
+        "ADD_VALE=true" \
+        "ADD_OPENAPI_TOOLS=false" \
+        "ADD_LIBREOFFICE=false"
+      ;;
+    *)
+      _fail "Unknown variant: $1  (expected: max | min)"
+      return 1
+      ;;
+  esac
+}
+# end::dxbx-variant-build-args[]
+
+# Remove a set of Docker volumes; warn about any that are still in use.
+# Usage: _remove_volumes vol1 vol2 ...
+_remove_volumes() {
+  local failed=()
+  for vol in "$@"; do
+    docker volume inspect "$vol" > /dev/null 2>&1 || continue  # skip if already gone
+    if ! docker volume rm "$vol" > /dev/null 2>&1; then
+      failed+=("$vol")
+    fi
+  done
+  if [[ ${#failed[@]} -gt 0 ]]; then
+    for vol in "${failed[@]}"; do
+      _warn "Could not remove volume: $vol (still in use)"
+      # Show which containers are holding this volume.
+      local holders
+      holders=$(docker ps -a --filter "volume=$vol" --format '  {{.Names}} ({{.Status}})' 2>/dev/null)
+      if [[ -n "$holders" ]]; then
+        _info "Held by:"
+        printf '%s\n' "$holders"
+        _info "Stop those containers first, then run $(_bold 'dxbx wipe --vols') again."
+      fi
+    done
+    return 1
+  fi
+}
+
+# Run a compose command, printing it first for transparency.
+_ensure_history_volume() {
+  # Shared external volumes must be pre-created by dxbx; Compose will not
+  # auto-create external volumes, and will error if they are missing.
+  # This covers the three cross-project shared volumes:
+  #   docops-shell-history  : shell history, precious
+  #   docops-npm-cache      : shared npm download cache, disposable
+  #   docops-pip-cache      : shared pip download cache, disposable
+  local vol
+  for vol in "$HISTORY_VOLUME" "docops-npm-cache" "docops-pip-cache"; do
+    if ! docker volume inspect "$vol" > /dev/null 2>&1; then
+      docker volume create "$vol" > /dev/null
+      _tick "Created shared volume: $vol"
+    fi
+  done
+}
+
+# Start an interactive container session with standard workspace + history mounts.
+# Extra docker run args (additional --volume, --env, etc.) may follow IMAGE and SHELL.
+# Usage: _launch_interactive IMAGE SHELL [extra docker run args...]
+_launch_interactive() {
+  local image="$1" shell="$2"; shift 2
+  _ensure_history_volume
+  local -a args=(
+    --rm --interactive --tty
+    --volume "${PWD}:/workspace:z"
+    --volume "${HISTORY_VOLUME}:/commandhistory"
+    --workdir /workspace
+    --env HOST_UID="$(id -u)"
+    --env HOST_GID="$(id -g)"
+    --env RUN_USER=appuser
+  )
+  [[ -n "${SSH_AUTH_SOCK:-}" ]] && [[ -S "${SSH_AUTH_SOCK}" ]] && \
+    args+=(--volume "${SSH_AUTH_SOCK}:/ssh-agent" --env SSH_AUTH_SOCK=/ssh-agent)
+  [[ $# -gt 0 ]] && args+=("$@")
+  _run_echo "docker run ${args[*]} $image $shell"
+  docker run "${args[@]}" "$image" "$shell"
+}
+
+# Run a one-off command in a fresh container with standard workspace mount.
+# Usage: _launch_exec IMAGE CMD [args...]
+_launch_exec() {
+  local image="$1"; shift
+  local -a args=(
+    --rm
+    --volume "${PWD}:/workspace:z"
+    --workdir /workspace
+    --env HOST_UID="$(id -u)"
+    --env HOST_GID="$(id -g)"
+    --env RUN_USER=appuser
+  )
+  _run_echo "docker run ${args[*]} $image $*"
+  docker run "${args[@]}" "$image" "$@"
+}
+
+_compose() {
+  # The compose file's `name:` field derives the project name from PROJECT_SLUG
+  # in .env, ensuring dxbx, direct docker compose calls, and VS Code Dev Containers
+  # all use the same project name (e.g. docops-boxdev) and share containers/networks.
+  _ensure_history_volume
+  _run_echo "docker compose --file $COMPOSE_FILE $*"
+  docker compose --file "$COMPOSE_FILE" "$@"
+}
+
+# Print the resolved image reference so users can see exactly which image will run.
+# Call after _load_env so IMAGE_TAG is available; falls back to computing it inline
+# for any caller that hasn't run _load_env yet.
+# Tag scheme (from build-matrix.sh):
+#   {registry}/box-{variant}:{context}-{ruby}  : when RUBY_VERSION is set
+#   {registry}/box-{variant}:{context}         : unversioned alias (primary Ruby)
+_resolve_image_ref() {
+  local tag
+  if [[ -n "${IMAGE_TAG:-}" ]]; then
+    tag="$IMAGE_TAG"
+  elif [[ -n "${RUBY_VERSION:-}" ]]; then
+    tag="${IMAGE_CONTEXT:-work}-${RUBY_VERSION}"
+  else
+    tag="${IMAGE_CONTEXT:-work}"
+  fi
+  printf '%s/box-%s:%s' "${IMAGE_REGISTRY:-docopslab}" "${IMAGE_VARIANT:-max}" "$tag"
+}
+
+# Populate DOCOPSBOX_IMAGE_ID and DOCOPSBOX_IMAGE_DIGEST by inspecting the local
+# image store. Exports both so they can be forwarded into the container environment.
+#   IMAGE_ID:     first 12 hex chars of the content-addressable config sha256.
+#                 Always present for any locally stored image (pulled or built).
+#   IMAGE_DIGEST: registry-assigned manifest digest (sha256 after @).
+#                 Only present for images that were pulled from a registry.
+#                 Empty for locally built or custom images.
+_export_image_identity() {
+  local image="$1"
+  local id="" digest=""
+  if docker image inspect "$image" > /dev/null 2>&1; then
+    id=$(docker inspect --format '{{.Id}}' "$image" 2>/dev/null | sed 's/^sha256://' | cut -c1-12 || true)
+    digest=$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' "$image" 2>/dev/null || true)
+  fi
+  export DOCOPSBOX_IMAGE_ID="${id:-unknown}"
+  export DOCOPSBOX_IMAGE_DIGEST="${digest:-}"
+}
+
+_print_image_info() {
+  local image
+  image="$(_resolve_image_ref)"
+  export DOCOPS_IMAGE_REF="$image"
+  _export_image_identity "$image"
+}
+
+_project_volume_names() {
+  local slug="${1:-${PROJECT_SLUG:-project}}"
+  printf '%s\n' \
+    "$HISTORY_VOLUME" \
+    "docops-${slug}-bundle" \
+    "docops-${slug}-node" \
+    "docops-${slug}-python"
+}
+
+_print_project_volumes() {
+  local slug="${1:-${PROJECT_SLUG:-project}}"
+  local vol
+  while IFS= read -r vol; do
+    [[ -z "$vol" ]] && continue
+
+    local sz disposition
+    if docker volume inspect "$vol" > /dev/null 2>&1; then
+      sz=$(docker run --rm -v "${vol}:/data" alpine du -sh /data 2>/dev/null | awk '{print $1}' || echo "?")
+    else
+      sz="not yet created"
+    fi
+
+    if [[ "$vol" == "$HISTORY_VOLUME" ]]; then
+      disposition="(precious)"
+    else
+      disposition="(disposable)"
+    fi
+
+    if [[ "$sz" == "not yet created" ]]; then
+      _warn "$(printf '%-40s %s' "$vol" "$sz")"
+    else
+      _tick "$(printf '%-40s %s  %s' "$vol" "$sz" "$disposition")"
+    fi
+  done < <(_project_volume_names "$slug")
+}
+
+_print_project_readiness() {
+  local errors=0 warnings=0
+
+  _sep
+  printf '%s
+' "$(_bold 'Readiness:')"
+
+  # OS detection
+  local os_label
+  if [[ -f /etc/os-release ]]; then
+    os_label=$(. /etc/os-release && echo "$PRETTY_NAME")
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    os_label="macOS $(sw_vers -productVersion 2>/dev/null || echo '')"
+  else
+    os_label="$(uname -s)"
+  fi
+  # WSL detection
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    os_label="${os_label} (via WSL2)"
+    local wsl2=true
+  else
+    local wsl2=false
+  fi
+  _tick "Operating system: $os_label"
+
+  # SSH agent detection
+  _require_ssh_agent || _warn "SSH agent not detected. Git operations over SSH inside the container will not work without additional setup."
+
+  # Docker daemon
+  if docker info > /dev/null 2>&1; then
+    local docker_ver
+    docker_ver=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "unknown")
+    _tick "Docker is running (version $docker_ver)"
+  elif [[ -S /var/run/docker.sock ]]; then
+    # Socket exists but access denied. Auto-re-exec via sg docker if possible.
+    if [[ "${_DXBX_SG_ACTIVE:-}" != "1" ]] && \
+       command -v sg > /dev/null 2>&1 && \
+       grep -qE "^docker:.*\b${USER}\b" /etc/group 2>/dev/null; then
+      export _DXBX_SG_ACTIVE=1
+      exec sg docker -c "$(printf '%q ' "$0" "${_DXBX_ORIG_ARGS[@]}")"  
+    fi
+    _fail "Docker is running but this user cannot access the socket."
+    _info "Add your user to the docker group: $(_bold 'sudo usermod -aG docker $USER')"
+    _info "Then log out and back in to activate it."
+    errors=$((errors + 1))
+  else
+    _fail "Docker daemon is not reachable."
+    if [[ "$wsl2" == true ]]; then
+      _info "Fix: Open Docker Desktop → Settings → Resources → WSL Integration"
+      _info "     Enable integration for your WSL2 distribution, then restart Docker Desktop."
+    else
+      _info "Fix: Run 'sudo systemctl enable --now docker' to start and enable Docker."
+    fi
+    errors=$((errors + 1))
+  fi
+
+  # Docker Compose
+  if docker compose version > /dev/null 2>&1; then
+    local compose_ver
+    compose_ver=$(docker compose version --short 2>/dev/null || echo "unknown")
+    _tick "Docker Compose available (version $compose_ver)"
+  else
+    _fail "Docker Compose (v2) not found."
+    _info "Fix: Update Docker Desktop, or install the Compose plugin:"
+    _info "     https://docs.docker.com/compose/install/"
+    errors=$((errors + 1))
+  fi
+
+  # Git
+  if command -v git > /dev/null 2>&1; then
+    local git_ver; git_ver=$(git --version | awk '{print $3}')
+    _tick "Git installed ($git_ver)"
+  else
+    _warn "Git not found natively (not required, but useful)."
+    warnings=$((warnings + 1))
+  fi
+
+  # docopsbox.yml present
+  if [[ -f "$COMPOSE_FILE" ]]; then
+    _tick "docopsbox.yml found ($COMPOSE_FILE)"
+  else
+    _fail "$(basename "$COMPOSE_FILE_CANONICAL") not found."
+    _info "Run dxbx commands from your project directory (the one containing $COMPOSE_FILE_CANONICAL)."
+    _info "Current directory: $PWD"
+    errors=$((errors + 1))
+  fi
+
+  # .env present
+  if [[ -f "$ENV_FILE" ]]; then
+    _tick ".config/.env found"
+  else
+    _warn ".config/.env not found; using built-in defaults."
+    _info "Tip: Copy .env.example to .env and set PROJECT_SLUG."
+    warnings=$((warnings + 1))
+  fi
+
+  # PROJECT_SLUG
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  _tick "PROJECT_SLUG: $slug ($(
+    if [[ -n "${PROJECT_SLUG:-}" ]]; then echo "from .env"
+    elif grep -qm1 '^:this_proj_slug:' "${PWD}/README.adoc" 2>/dev/null; then echo "from README.adoc"
+    else echo "from directory name fallback"; fi
+  ))"
+
+  # Image availability
+  local image; image=$(_resolve_image_ref)
+  if docker image inspect "$image" > /dev/null 2>&1; then
+    _tick "Image found: $image"
+  else
+    _warn "Image '$image' not found locally."
+    _info "It will be pulled automatically when you run $(_bold 'dxbx up') or open the Dev Container."
+    warnings=$((warnings + 1))
+  fi
+
+  # WSL2-specific: Docker socket accessible
+  if [[ "$wsl2" == true ]]; then
+    _sep
+    printf '%s\n' "$(_bold 'WSL2 checks:')"
+    if [[ -S /var/run/docker.sock ]]; then
+      _tick "Docker socket accessible from WSL2"
+    else
+      _fail "Docker socket not accessible from WSL2."
+      _info "Fix: Open Docker Desktop → Settings → Resources → WSL Integration"
+      _info "     Enable integration for your WSL2 distribution."
+      errors=$((errors + 1))
+    fi
+  fi
+
+  if [[ $errors -gt 0 ]]; then
+    _fail "Not ready ($errors error(s), $warnings warning(s))"
+    return 1
+  elif [[ $warnings -gt 0 ]]; then
+    _warn "Ready with $warnings warning(s)"
+  else
+    _tick "All systems operational"
+  fi
+}
+
+_require_docker() {
+  if ! docker info > /dev/null 2>&1; then
+    if [[ -S /var/run/docker.sock ]]; then
+      # Socket exists but access denied. If the user is in the docker group
+      # in /etc/group but the session hasn't activated it yet, transparently
+      # re-exec via `sg docker`; no logout required.
+      if [[ "${_DXBX_SG_ACTIVE:-}" != "1" ]] && \
+         command -v sg > /dev/null 2>&1 && \
+         grep -qE "^docker:.*\b${USER}\b" /etc/group 2>/dev/null; then
+        export _DXBX_SG_ACTIVE=1
+        exec sg docker -c "$(printf '%q ' "$0" "${_DXBX_ORIG_ARGS[@]}")"  
+      fi
+      _fail "Docker is running but this user cannot access it."
+      _info "Add your user to the docker group and log out to activate it:"
+      _info "  sudo usermod -aG docker \$USER"
+    else
+      _fail "Docker is not running."
+      _info "Start Docker Desktop (or run 'sudo systemctl enable --now docker' on Linux)."
+      _info "Run '$(_bold 'dxbx stat')' to diagnose your environment."
+    fi
+    exit 1
+  fi
+}
+
+_instruct_gh_ssh_setup() {
+    local key_file="$1"
+    printf '\n'
+    _tick "SSH key ready."
+    printf '\n'
+    _info "$(_bold 'Next: add your public key to GitHub')"
+    _info "  1. Copy the key printed below."
+    _info "  2. Go to: https://github.com/settings/ssh/new"
+    _info "  3. Set Key type to $(_bold 'Authentication Key'), paste, and save."
+    printf '\n'
+    cat "${key_file}.pub"
+    printf '\n'  
+}
+
+# Ensure the host has an SSH key generated and loaded into the ssh-agent.
+# Cross-platform: macOS (Keychain + --apple-use-keychain + ssh config) and Linux.
+_require_ssh_agent() {
+  local is_macos=false
+  [[ "$(uname)" == "Darwin" ]] && is_macos=true
+
+  # Already have an agent with at least one identity loaded; nothing to do.
+  if [[ -n "${SSH_AUTH_SOCK:-}" && -S "${SSH_AUTH_SOCK}" ]]; then
+    if ssh-add -l > /dev/null 2>&1; then
+      return 0
+    fi
+    # Agent socket exists but no identities; fall through to load or generate.
+  fi
+
+  # Look for an existing private key (preference: ed25519 > ecdsa > rsa).
+  local key_file=""
+  local _candidate
+  for _candidate in "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/id_ecdsa" "${HOME}/.ssh/id_rsa"; do
+    if [[ -f "$_candidate" ]]; then
+      key_file="$_candidate"
+      break
+    fi
+  done
+
+  # No key on disk; generate a new Ed25519 key.
+  local key_generated=false
+  if [[ -z "$key_file" ]]; then
+    printf '\n%s\n' "$(_bold 'No SSH key found; setting up GitHub SSH access')"
+    _sep
+    _info "A new Ed25519 key will be generated at ~/.ssh/id_ed25519."
+    printf '\n'
+
+    # Prefer email from git config to avoid unnecessary prompting.
+    local email
+    email=$(git config --global user.email 2>/dev/null || true)
+    if [[ -z "$email" ]]; then
+      printf '%s ' "$(_bold 'Input your GitHub email address (or Enter to skip):')"
+      read -r email
+      if [[ -z "$email" ]]; then
+        _warn "SSH key setup skipped (no email provided)."
+        _info "Generate a key manually with:  ssh-keygen -t ed25519 -C \"you@example.com\""
+        return 0
+      fi
+    else
+      _info "Using git config email: $(_bold "$email")"
+    fi
+
+    printf '\n'
+    _info "Generating ~/.ssh/id_ed25519 …"
+    _info "(You will be prompted for an optional passphrase; press Enter to skip.)"
+    printf '\n'
+    mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
+    if ! ssh-keygen -t ed25519 -C "$email" -f "${HOME}/.ssh/id_ed25519"; then
+      _warn "ssh-keygen failed. Generate a key manually:"
+      _info "  ssh-keygen -t ed25519 -C \"$email\""
+      return 0
+    fi
+    key_file="${HOME}/.ssh/id_ed25519"
+    key_generated=true
+    printf '\n'
+    _tick "Key generated: $key_file"
+  fi
+
+  # Start the ssh-agent if it is not already running in this session.
+  if [[ -z "${SSH_AUTH_SOCK:-}" || ! -S "${SSH_AUTH_SOCK}" ]]; then
+    _info "Starting ssh-agent …"
+    eval "$(ssh-agent -s)" > /dev/null
+  fi
+
+  # macOS: write a github.com block in ~/.ssh/config so the passphrase is
+  # stored in Keychain and keys are auto-loaded after a reboot.
+  if [[ "$is_macos" == true ]]; then
+    local ssh_config="${HOME}/.ssh/config"
+    if ! grep -q "Host github.com" "$ssh_config" 2>/dev/null; then
+      _info "Adding github.com block to ~/.ssh/config …"
+      touch "$ssh_config" && chmod 600 "$ssh_config"
+      printf '\nHost github.com\n  AddKeysToAgent yes\n  UseKeychain yes\n  IdentityFile %s\n' \
+        "$key_file" >> "$ssh_config"
+    fi
+    # --apple-use-keychain stores the passphrase in macOS Keychain.
+    # Fall back to plain ssh-add if the flag is unavailable (pre-Monterey builds).
+    if ! ssh-add --apple-use-keychain "$key_file" 2>/dev/null; then
+      ssh-add "$key_file" 2>/dev/null || true
+    fi
+  else
+    ssh-add "$key_file" 2>/dev/null || true
+  fi
+
+  if [[ "$key_generated" == true ]]; then
+    _instruct_gh_ssh_setup "$key_file"
+  else
+    _tick "SSH key loaded into agent: $key_file"
+  fi
+}
+
+# Confirm a destructive action. Usage: _confirm "prompt text"
+_confirm() {
+  printf '%s [y/N] ' "$(_yellow "$1")"
+  read -r reply
+  [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# Fetch a URL to stdout; tries curl then wget.
+_fetch() {
+  if command -v curl > /dev/null 2>&1; then
+    curl -fsSL "$1"
+  elif command -v wget > /dev/null 2>&1; then
+    wget -qO- "$1"
+  else
+    _fail "Neither curl nor wget found. Install one and try again."
+    exit 1
+  fi
+}
+
+# Detect whether a string looks like a variant/context image specifier.
+# Valid forms:
+#   min  max  work  live
+#   min:work  min:live  max:work  max:live
+#   box-min  box-max  box-min:work  box-max:live  (box- prefix is accepted)
+#   :work  :live  (context only, leading colon)
+# Patterns are derived from DXBX_VARIANTS/DXBX_CONTEXTS so the matrix is one source.
+# Used by cmd_make, which manages its own parse loop.
+_is_image_spec() {
+  local s="${1#box-}"  # strip optional box- prefix for matching
+  local variants; variants="$(IFS='|'; printf '%s' "${DXBX_VARIANTS[*]}")"
+  local contexts; contexts="$(IFS='|'; printf '%s' "${DXBX_CONTEXTS[*]}")"
+  [[ "$s" =~ ^($variants)(:($contexts))?$ ]] || \
+  [[ "$s" =~ ^($contexts)$ ]] || \
+  [[ "$s" =~ ^:($contexts)$ ]]
+}
+
+# Returns true if $1 looks like a Docker image ID.
+_is_image_id() {
+  [[ "$1" =~ ^[0-9a-f]{12}$ ]] || \
+  [[ "$1" =~ ^[0-9a-f]{64}$ ]] || \
+  [[ "$1" =~ ^sha256:[0-9a-f]{64}$ ]]
+}
+
+# Returns true if $1 is any valid image-spec token: variant/context combo,
+# Ruby version string (N.N or N.N.N), or Docker image ID.
+_is_spec_token() {
+  _is_image_spec "$1" || \
+  [[ "$1" =~ ^[2-4]+\.[0-7](\.[0-9]{1,2})?$ ]] || \
+  _is_image_id "$1"
+}
+
+# Consume all leading image-spec tokens from "$@", exporting the resolved vars.
+# Sets globals (no subshell; must be called with plain syntax, not $(...)):
+#   DXBX_SPEC_CONSUMED      : number of tokens consumed; shift by this after calling
+#   DXBX_IMAGE_REF_OVERRIDE : non-empty when an image ID was given; bypasses
+#                             name-based image resolution in the calling command
+# Also exports: IMAGE_VARIANT, IMAGE_CONTEXT, RUBY_VERSION as appropriate.
+# Must be called BEFORE _load_env so CLI values survive the env-file load.
+# Usage: _parse_image_spec_multi "$@"; shift "$DXBX_SPEC_CONSUMED"
+DXBX_SPEC_CONSUMED=0
+DXBX_IMAGE_REF_OVERRIDE=""
+_parse_image_spec_multi() {
+  DXBX_SPEC_CONSUMED=0
+  DXBX_IMAGE_REF_OVERRIDE=""
+  local variants; variants="$(IFS='|'; printf '%s' "${DXBX_VARIANTS[*]}")"
+  local contexts; contexts="$(IFS='|'; printf '%s' "${DXBX_CONTEXTS[*]}")"
+  while [[ $# -gt 0 ]]; do
+    local tok="$1" s="${1#box-}"
+    if [[ "$s" =~ ^($variants)(:($contexts))?$ ]]; then
+      if [[ "$s" == *:* ]]; then
+        export IMAGE_VARIANT="${s%%:*}"
+        export IMAGE_CONTEXT="${s##*:}"
+      else
+        export IMAGE_VARIANT="$s"
+      fi
+    elif [[ "$s" =~ ^:?($contexts)$ ]]; then
+      export IMAGE_CONTEXT="${s#:}"
+    elif [[ "$s" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+      export RUBY_VERSION="$s"
+    elif _is_image_id "$s"; then
+      DXBX_IMAGE_REF_OVERRIDE="$tok"
+    else
+      break
+    fi
+    (( DXBX_SPEC_CONSUMED++ )) || true
+    shift
+  done
+}
+
+# Parse an image specifier and export IMAGE_VARIANT and/or IMAGE_CONTEXT.
+# Must be called BEFORE _load_env so these values are treated as shell-level
+# overrides and preserved across the env-file load.
+_parse_image_spec() {
+  _parse_image_spec_multi "$@"
+}
+
+# COMMANDS
+
+cmd_init() {
+  _check_help "${1:-}" "init" \
+    "Download DocOps Box config files into the current directory." \
+    "dxbx init"
+  local target_dir="$PWD"
+  local upstream_raw="https://raw.githubusercontent.com/DocOps/box/latest"
+
+  printf '\n%s\n' "$(_bold 'DocOps Box Init')"
+  _sep
+  _info "Target directory: $target_dir"
+  printf '\n'
+
+  # Warn about any files that would be overwritten
+  # .env.local is excluded; it is never overwritten (personal machine config)
+  local existing=()
+  for f in .config/docopsbox.yml .config/.env .devcontainer/devcontainer.json; do
+    [[ -f "$target_dir/$f" ]] && existing+=("$f")
+  done
+  if [[ ${#existing[@]} -gt 0 ]]; then
+    _warn "The following files already exist:"
+    for f in "${existing[@]}"; do _info "  $f"; done
+    printf '\n'
+    if ! _confirm "Overwrite existing files?"; then
+      printf 'Init cancelled. No files changed.\n'
+      exit 0
+    fi
+  fi
+
+  _require_ssh_agent
+
+  # Prompt for PROJECT_SLUG (default: slugified directory name)
+  local default_slug
+  default_slug=$(basename "$target_dir" | tr '[:upper:]' '[:lower:]' | \
+    sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//')
+  printf '\n%s ' "$(_bold "Project slug:")"
+  read -e -r -i "$default_slug" input_slug
+  local slug="${input_slug:-$default_slug}"
+
+  printf '\n'
+  _info "Downloading configuration files..."
+
+  # Download each file, reporting inline pass/fail
+  local dl_ok=true
+  # Compose config goes into .config/ (keeps project root clean).
+  # .devcontainer/ stays at the standard path; required for VSCode auto-discovery.
+  mkdir -p "$target_dir/.config" "$target_dir/.devcontainer"
+
+  # Download .env and docopsbox.yml into .config/ (keeps project root clean).
+  # .devcontainer/ stays at the standard path; required for VSCode auto-discovery.
+  for dest_file in ".config/.env:.env" ".config/docopsbox.yml:docopsbox.yml"; do
+    local dest="${dest_file%%:*}"
+    local src="${dest_file##*:}"
+    printf '  %-40s' "$dest"
+    if _fetch "$upstream_raw/templates/$src" > "$target_dir/$dest" 2>/dev/null; then
+      printf '%s\n' "$(_green 'OK')"
+    else
+      printf '%s\n' "$(_red 'FAILED')"
+      dl_ok=false
+    fi
+  done
+  printf '  %-40s' ".devcontainer/devcontainer.json"
+  if _fetch "$upstream_raw/templates/.devcontainer/devcontainer.json" \
+      > "$target_dir/.devcontainer/devcontainer.json" 2>/dev/null; then
+    printf '%s\n' "$(_green 'OK')"
+  else
+    printf '%s\n' "$(_red 'FAILED')"
+    dl_ok=false
+  fi
+
+  # .env.local: write only on first init; never overwrite an existing personal config
+  printf '  %-40s' ".config/.env.local"
+  if [[ -f "$target_dir/.config/.env.local" ]]; then
+    printf '%s\n' "$(_yellow 'skipped (already exists)')"
+  elif _fetch "$upstream_raw/templates/.env.local" \
+      > "$target_dir/.config/.env.local" 2>/dev/null; then
+    printf '%s\n' "$(_green 'OK')"
+  else
+    printf '%s\n' "$(_red 'FAILED')"
+    dl_ok=false
+  fi
+
+  if [[ "$dl_ok" == false ]]; then
+    _fail "One or more files could not be downloaded."
+    _info "Check your internet connection and try again."
+    exit 1
+  fi
+
+  # Patch PROJECT_SLUG into .config/.env (portable: temp-file sed, works on Linux and macOS)
+  local tmpfile; tmpfile=$(mktemp)
+  sed "s/^PROJECT_SLUG=.*/PROJECT_SLUG=${slug}/" "$target_dir/.config/.env" > "$tmpfile" && \
+    mv "$tmpfile" "$target_dir/.config/.env"
+
+  # Add standard DocOps Box entries to .gitignore if not already present
+  local gitignore="$target_dir/.gitignore"
+  local new_entries=(".config/.env.local" "backups/" "node_modules/")
+  local added=()
+  for entry in "${new_entries[@]}"; do
+    if [[ -f "$gitignore" ]] && grep -qF "$entry" "$gitignore" 2>/dev/null; then
+      continue
+    fi
+    added+=("$entry")
+  done
+  if [[ ${#added[@]} -gt 0 ]]; then
+    # Write all new entries under a single section header
+    printf '\n# Added by DocOps Box\n' >> "$gitignore"
+    for entry in "${added[@]}"; do
+      printf '%s\n' "$entry" >> "$gitignore"
+    done
+    _tick ".gitignore updated (added: ${added[*]})"
+  else
+    _tick ".gitignore already up to date"
+  fi
+
+  # Load the freshly written .config/.env so IMAGE_VARIANT/IMAGE_CONTEXT are available below
+  ENV_FILE="$target_dir/.config/.env"
+  ENV_LOCAL_FILE="$target_dir/.config/.env.local"
+  _load_env
+
+  printf '\n'
+  _tick "Project initialized: $(_bold "$slug")"
+  _sep
+  printf '\n%s\n\n' "$(_bold 'Next steps:')"
+  _info "1. Start your environment:"
+  _info "   $(_bold 'dxbx up')   : interactive terminal session"
+  _info "   VS Code: Command Palette → $(_bold 'Dev Containers: Reopen in Container')"
+  _info "   (The Docker image is pulled automatically on first use.)"
+  printf '\n'
+  _info "2. Commit to Git:  .config/  .devcontainer/"
+  _info "   Never commit .config/.env.local (it is in .gitignore)."
+  printf '\n'
+}
+
+cmd_run() {
+  _check_help "${1:-}" "up" \
+    "Start the DocOps Box container and open an interactive shell." \
+    "dxbx up [image-spec]" \
+    "  image-spec  Optional. Variant (min|max), context (work|live), Ruby version (3.4)," \
+    "              image ID (12-char hex), or any combination (ex: min live 3.4)"
+  _parse_image_spec_multi "$@"; shift "$DXBX_SPEC_CONSUMED"
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+
+  # Image ID override: bypass image name resolution and compose entirely.
+  if [[ -n "${DXBX_IMAGE_REF_OVERRIDE:-}" ]]; then
+    _launch_interactive "$DXBX_IMAGE_REF_OVERRIDE" bash
+    return
+  fi
+
+  if [[ "${IMAGE_CONTEXT:-work}" == live* ]]; then
+    _fail "'dxbx up' is not supported for live images (no interactive shell installed)."
+    _info "Use $(_bold 'dxbx ex') to run one-off commands:  dxbx ex ${IMAGE_CONTEXT} <command>"
+    exit 1
+  fi
+
+  # Quick-start: no compose file found; run directly via docker run
+  if [[ ! -f "$COMPOSE_FILE" ]]; then
+    printf '\n%s\n' "$(_bold 'Quick-start: no docopsbox.yml found in this directory')"
+    _info "(Looked for: $COMPOSE_FILE_CANONICAL)"
+    _info "Launching a one-off session with default settings."
+    _info "Run $(_bold 'dxbx init') to save project settings for this directory."
+    _sep
+    local image; image=$(_resolve_image_ref)
+    if ! docker image inspect "$image" > /dev/null 2>&1; then
+      printf '\n'
+      _info "Image not found locally; pulling $image …"
+      docker pull "$image"
+    fi
+    _export_image_identity "$image"
+    _launch_interactive "$image" zsh \
+      --volume "docops-${slug}-bundle:/usr/local/bundle" \
+      --volume "docops-${slug}-node:/workspace/node_modules" \
+      --volume "docops-${slug}-python:/opt/venv" \
+      --volume "docops-npm-cache:/npm-cache" \
+      --volume "docops-pip-cache:/pip-cache" \
+      --env IMAGE_CONTEXT="${IMAGE_CONTEXT:-work}" \
+      --env DOCOPS_IMAGE_REF="$image" \
+      --env DOCOPSBOX_IMAGE_ID="${DOCOPSBOX_IMAGE_ID:-}" \
+      --env DOCOPSBOX_IMAGE_DIGEST="${DOCOPSBOX_IMAGE_DIGEST:-}"
+    return
+  fi
+
+  _print_image_info
+  # Forward the host SSH agent if available. Enables authenticated Git
+  # operations (push/pull over SSH) inside the container without extra config.
+  local -a extra_args=(
+    -e "DOCOPSBOX_IMAGE_ID=${DOCOPSBOX_IMAGE_ID:-}"
+    -e "DOCOPSBOX_IMAGE_DIGEST=${DOCOPSBOX_IMAGE_DIGEST:-}"
+  )
+  if [[ -n "${SSH_AUTH_SOCK:-}" ]] && [[ -S "${SSH_AUTH_SOCK}" ]]; then
+    extra_args+=(-v "${SSH_AUTH_SOCK}:/ssh-agent" -e "SSH_AUTH_SOCK=/ssh-agent")
+  fi
+  _compose run --rm ${extra_args[@]+"${extra_args[@]}"} docops
+}
+
+cmd_shell() {
+  _check_help "${1:-}" "sh" \
+    "Open an interactive shell inside the running container." \
+    "dxbx sh [image-spec]  (alias: dxbx shell)" \
+    "  image-spec  Optional. Variant (min|max), context (work|live), Ruby version (3.4)," \
+    "              image ID (12-char hex), or any combination (ex: min live 3.4)"
+  _parse_image_spec_multi "$@"; shift "$DXBX_SPEC_CONSUMED"
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+
+  # Image ID override: start a fresh interactive container from that image directly.
+  if [[ -n "${DXBX_IMAGE_REF_OVERRIDE:-}" ]]; then
+    _launch_interactive "$DXBX_IMAGE_REF_OVERRIDE" bash
+    return
+  fi
+
+  if [[ "${IMAGE_CONTEXT:-work}" == live* ]]; then
+    _fail "'dxbx sh' is not supported for live images (no interactive shell installed)."
+    _info "Use $(_bold 'dxbx ex') to run one-off commands:  dxbx ex ${IMAGE_CONTEXT} <command>"
+    exit 1
+  fi
+
+  _print_image_info
+  # Start the container if not running, then exec an interactive shell.
+  # DOCOPSBOX_IMAGE_ID/DIGEST are already exported by _print_image_info above;
+  # compose variable interpolation picks them up without explicit --env flags.
+  if ! docker compose --file "$COMPOSE_FILE" ps --services --filter status=running 2>/dev/null | grep -q '^docops$'; then
+    _compose up -d docops
+  fi
+  _compose exec docops zsh
+}
+
+cmd_exec() {
+  _check_help "${1:-}" "ex" \
+    "Run a one-off command in a fresh container (creates if needed, removed after)." \
+    "dxbx ex [image-spec] <command> [args...] (alias: dxbx exec)" \
+    "  image-spec  Optional. Variant (min|max), context (work|live), Ruby version (3.4)," \
+    "              image ID (12-char hex), or any combination (ex: min live 3.4)"
+  _parse_image_spec_multi "$@"; shift "$DXBX_SPEC_CONSUMED"
+  if [[ $# -eq 0 ]]; then
+    _fail "Usage: dxbx ex [image-spec] <command> [args...]"
+    exit 1
+  fi
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  # Image ID override: bypass compose and run against the specified image directly.
+  if [[ -n "${DXBX_IMAGE_REF_OVERRIDE:-}" ]]; then
+    _launch_exec "$DXBX_IMAGE_REF_OVERRIDE" "$@"
+    return
+  fi
+  _print_image_info
+  _compose run --rm docops "$@"
+}
+
+cmd_stop() {
+  _check_help "${1:-}" "stop" \
+    "Stop the persistent project container started by 'dxbx sh' or VS Code Dev Containers." \
+    "Does not affect ephemeral 'dxbx up' sessions (those exit on their own)." \
+    "dxbx stop (alias: dxbx down)"
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  _compose stop docops
+  _tick "Persistent container stopped. Volumes preserved. Run '$(_bold 'dxbx sh')' to restart."
+}
+
+cmd_wipe() {
+  _check_help "${1:-}" "wipe" \
+    "Remove stopped containers and optionally dependency volumes." \
+    "dxbx wipe           # remove stopped containers (keep all volumes)  (alias: dxbx clean)" \
+    "dxbx wipe --vols    # also remove dependency caches (gems, node, python); preserve history" \
+    "dxbx wipe --hist    # also delete shell history volume (double-confirmed)"
+
+  local mode="containers"
+  case "${1:-}" in
+    --vols) mode="vols"; shift ;;
+    --hist) mode="hist"; shift ;;
+  esac
+
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+
+  if [[ "$mode" == "containers" ]]; then
+    _compose rm --stop --force docops
+    _tick "Stopped containers removed. Volumes preserved."
+    return
+  fi
+
+  local bundle_vol="docops-${slug}-bundle"
+  local node_vol="docops-${slug}-node"
+  local python_vol="docops-${slug}-python"
+
+  if [[ "$mode" == "hist" ]]; then
+    _warn "FULL WIPE: This will delete the container, dependency caches, AND your shell history."
+    _warn "Shell history ($HISTORY_VOLUME) cannot be recovered after this operation."
+    if ! _confirm "Are you sure you want to delete everything, including shell history?"; then
+      printf 'Wipe cancelled.\n'; exit 0
+    fi
+    if ! _confirm "Double-confirm: delete shell history volume '$HISTORY_VOLUME'?"; then
+      printf 'Wipe cancelled.\n'; exit 0
+    fi
+    _compose rm --stop --force docops 2>/dev/null || true
+    _run_echo "docker volume rm $bundle_vol $node_vol $python_vol $HISTORY_VOLUME"
+    if _remove_volumes "$bundle_vol" "$node_vol" "$python_vol" "$HISTORY_VOLUME"; then
+      _tick "Full wipe complete. All volumes removed."
+    else
+      _fail "Full wipe incomplete; one or more volumes could not be removed (see above)."
+      return 1
+    fi
+  else
+    # --vols
+    _warn "Wipe will remove the container and dependency caches ($bundle_vol, $node_vol, $python_vol)."
+    _warn "Shell history ($HISTORY_VOLUME) will be preserved."
+    if ! _confirm "Proceed with wipe?"; then
+      printf 'Wipe cancelled.\n'; exit 0
+    fi
+    _compose rm --stop --force docops 2>/dev/null || true
+    _run_echo "docker volume rm $bundle_vol $node_vol $python_vol"
+    if _remove_volumes "$bundle_vol" "$node_vol" "$python_vol"; then
+      _tick "Wipe complete. Dependency caches cleared. Shell history preserved."
+      _info "Run '$(_bold 'dxbx sh')' to start fresh (gems/packages will reinstall on first run)."
+    else
+      _fail "Wipe incomplete; one or more volumes could not be removed (see above)."
+      return 1
+    fi
+  fi
+}
+
+cmd_back() {
+  if [[ "${1:-}" == "--undo" ]]; then
+    shift
+    _check_help "${1:-}" "back --undo" \
+      "Restore Zsh history into the container from the latest (or a chosen) backup." \
+      "dxbx back --undo                        # restore latest (prompts if history exists)" \
+      "dxbx back --undo --append               # append backup entries to existing history" \
+      "dxbx back --undo --replace              # overwrite existing history without prompting" \
+      "dxbx back --undo --from <file>          # restore from a specific backup file"
+    _require_docker
+
+    local backup_dir="${XDG_DATA_HOME:-$HOME/.local/share}/docopslab/dxbx/backups"
+    local mode="prompt"  # prompt | append | replace
+    local src_file=""
+
+    # Parse optional arguments
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --append)  mode="append";  shift ;;
+        --replace) mode="replace"; shift ;;
+        --from)
+          if [[ -z "${2:-}" ]]; then
+            _fail "--from requires a file path argument."
+            exit 1
+          fi
+          src_file="$2"; shift 2
+          ;;
+        *)
+          _fail "Unknown argument: $1"
+          _info "Run 'dxbx back --undo --help' for usage."
+          exit 1
+          ;;
+      esac
+    done
+
+    # Resolve source file
+    if [[ -z "$src_file" ]]; then
+      if [[ ! -d "$backup_dir" ]] || [[ -z "$(ls -A "$backup_dir" 2>/dev/null)" ]]; then
+        _fail "No backups found in $backup_dir"
+        _info "Run '$(_bold 'dxbx back')' to create one first."
+        exit 1
+      fi
+      src_file=$(ls -t "$backup_dir"/zsh_history_*.txt 2>/dev/null | head -1)
+      if [[ -z "$src_file" ]]; then
+        _fail "No backup files found in $backup_dir"
+        exit 1
+      fi
+      printf 'Latest backup: %s\n' "$src_file"
+    elif [[ ! -f "$src_file" ]]; then
+      _fail "Backup file not found: $src_file"
+      exit 1
+    fi
+
+    # Check whether history already exists in the volume
+    local history_exists=false
+    if docker volume inspect "$HISTORY_VOLUME" > /dev/null 2>&1; then
+      local line_count
+      line_count=$(docker run --rm -v "${HISTORY_VOLUME}:/data" alpine \
+        sh -c 'wc -l < /data/.zsh_history 2>/dev/null || echo 0' 2>/dev/null | tr -d '[:space:]')
+      [[ "${line_count:-0}" -gt 0 ]] && history_exists=true
+    fi
+
+    # Resolve mode when prompting
+    if [[ "$mode" == "prompt" && "$history_exists" == true ]]; then
+      _warn "Existing history found in volume $HISTORY_VOLUME ($line_count lines)."
+      printf '%s\n' "  1) Append backup entries to existing history"
+      printf '%s\n' "  2) Replace existing history with backup"
+      printf '%s\n' "  3) Cancel"
+      printf 'Choose [1/2/3]: '
+      read -r choice
+      case "$choice" in
+        1) mode="append"  ;;
+        2) mode="replace" ;;
+        *) printf 'Undo cancelled.\n'; exit 0 ;;
+      esac
+    elif [[ "$mode" == "prompt" ]]; then
+      mode="replace"  # nothing to conflict with
+    fi
+
+    # Perform the restore
+    printf '\nRestoring from: %s\n' "$src_file"
+    if [[ "$mode" == "append" ]]; then
+      _run_echo "docker run --rm -v $HISTORY_VOLUME:/data -v $src_file:/backup.txt:ro alpine sh -c 'cat /backup.txt >> /data/.zsh_history'"
+      if docker run --rm \
+          -v "${HISTORY_VOLUME}:/data" \
+          -v "${src_file}:/backup.txt:ro" \
+          alpine sh -c 'cat /backup.txt >> /data/.zsh_history'; then
+        _tick "History appended to volume $HISTORY_VOLUME"
+      else
+        _fail "Restore failed."; exit 1
+      fi
+    else
+      _run_echo "docker run --rm -v $HISTORY_VOLUME:/data -v $src_file:/backup.txt:ro alpine cp /backup.txt /data/.zsh_history"
+      if docker run --rm \
+          -v "${HISTORY_VOLUME}:/data" \
+          -v "${src_file}:/backup.txt:ro" \
+          alpine cp /backup.txt /data/.zsh_history; then
+        _tick "History replaced in volume $HISTORY_VOLUME"
+      else
+        _fail "Restore failed."; exit 1
+      fi
+    fi
+    return
+  fi
+
+  # Default: backup
+  _check_help "${1:-}" "back" \
+    "Export the container's Zsh history to a local backup file." \
+    "dxbx back            # back up history  (alias: dxbx backup)" \
+    "dxbx back --undo     # restore history from a backup (append or replace)"
+  _require_docker
+  local backup_dir="${XDG_DATA_HOME:-$HOME/.local/share}/docopslab/dxbx/backups"
+  local date_str; date_str=$(date +%Y%m%d-%H%M%S)
+  local outfile="${backup_dir}/zsh_history_${date_str}.txt"
+
+  mkdir -p "$backup_dir"
+  printf 'Exporting shell history from volume %s...\n' "$HISTORY_VOLUME"
+  _run_echo "docker run --rm -v $HISTORY_VOLUME:/data alpine cat /data/.zsh_history"
+  if docker run --rm -v "${HISTORY_VOLUME}:/data" alpine cat /data/.zsh_history > "$outfile" 2>/dev/null; then
+    _tick "Shell history saved to: $outfile"
+  else
+    _fail "Could not export history. Is the volume '$HISTORY_VOLUME' present?"
+    _info "Check with: $(_bold 'dxbx stat')"
+    exit 1
+  fi
+}
+
+cmd_logs() {
+  _check_help "${1:-}" "logs" \
+    "Show recent log output from the container." \
+    "dxbx logs [--follow]"
+  local follow_flag=""
+  if [[ "${1:-}" == "--follow" || "${1:-}" == "-f" ]]; then
+    follow_flag="--follow"
+    shift
+  fi
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  # Use the explicit container_name from docopsbox.yml, which is stable regardless
+  # of whether the container was started by `dxbx sh` (compose up) or VS Code
+  # Dev Containers (also compose up). Interactive `dxbx up` sessions are
+  # ephemeral and removed on exit; their output is already in your terminal.
+  local container_name="docopsbox_${slug}"
+  if ! docker ps --filter "name=${container_name}" --format '{{.Names}}' 2>/dev/null \
+      | grep -qxF "${container_name}"; then
+    _fail "No running container named '${container_name}'."
+    _info "Start with $(_bold 'dxbx sh') or reopen the project in VS Code Dev Containers."
+    _info "Interactive $(_bold 'dxbx up') sessions are ephemeral; output appears directly in your terminal."
+    exit 1
+  fi
+  _run_echo "docker logs --tail=100 ${follow_flag} ${container_name}"
+  # shellcheck disable=SC2086
+  docker logs --tail=100 ${follow_flag} "${container_name}"
+}
+
+cmd_list() {
+  _check_help "${1:-}" "list" \
+    "List all DocOps Box managed projects and their volumes." \
+    "dxbx list"
+  _require_docker
+
+  printf '\n%s\n' "$(_bold 'DocOps Box: All Managed Projects')"
+  _sep
+
+  printf '%s\n' "$(_bold 'Containers:')"
+  local container_found=false
+  while IFS='|' read -r name status image project_slug; do
+    [[ -z "$name" ]] && continue
+    container_found=true
+    if [[ "$status" == *"Up"* ]]; then
+      _tick "$(printf '%-36s %-10s  image: %-30s project: %s' "$name" "running" "$image" "$project_slug")"
+    else
+      _warn "$(printf '%-36s %-10s  image: %-30s project: %s' "$name" "stopped" "$image" "$project_slug")"
+    fi
+  done < <(docker ps -a \
+    --filter "label=dxbx.managed=true" \
+    --format '{{.Names}}|{{.Status}}|{{.Image}}|{{.Label "dxbx.project_slug"}}' 2>/dev/null)
+  [[ "$container_found" == false ]] && _info "(none found)"
+
+  printf '\n'
+  printf '%s\n' "$(_bold 'Volumes:')"
+  local volume_found=false
+  while IFS= read -r vol; do
+    [[ -z "$vol" ]] && continue
+    volume_found=true
+    local sz disposition
+    sz=$(docker run --rm -v "${vol}:/data" alpine du -sh /data 2>/dev/null | awk '{print $1}' || echo "?")
+    if [[ "$vol" == "docops-shell-history" ]]; then
+      disposition="precious (shared across all projects)"
+    elif [[ "$vol" == "docops-npm-cache" || "$vol" == "docops-pip-cache" ]]; then
+      disposition="shared download cache"
+    else
+      disposition="disposable (per-project)"
+    fi
+    _tick "$(printf '%-42s %-8s  %s' "$vol" "$sz" "$disposition")"
+  done < <(docker volume ls --format '{{.Name}}' 2>/dev/null | grep '^docops-')
+  [[ "$volume_found" == false ]] && _info "(none found)"
+
+  printf '\n'
+}
+
+cmd_status() {
+  _check_help "${1:-}" "stat" \
+    "Show project status, volumes, and readiness checks." \
+    "dxbx stat  (alias: dxbx status)"
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+
+  printf '\n%s\n' "$(_bold 'DocOps Box Status')"
+  _sep
+  printf '%-28s %s\n' "PROJECT_SLUG:" "$slug"
+  printf '%-28s %s\n' "IMAGE_VARIANT:" "${IMAGE_VARIANT:-max}"
+  printf '%-28s %s\n' "IMAGE_CONTEXT:" "${IMAGE_CONTEXT:-work}"
+  local _image; _image=$(_resolve_image_ref)
+  _export_image_identity "$_image"
+  printf '%-28s %s\n' "IMAGE:" "$_image"
+  printf '%-28s %s\n' "IMAGE ID:" "${DOCOPSBOX_IMAGE_ID:-unknown}"
+  if [[ -n "$DOCOPSBOX_IMAGE_DIGEST" ]]; then
+    printf '%-28s %s\n' "IMAGE DIGEST:" "$DOCOPSBOX_IMAGE_DIGEST"
+  else
+    printf '%-28s %s\n' "IMAGE DIGEST:" "(no registry digest)"
+  fi
+  printf '%-28s %s\n' "RUBY_VERSION:" "${RUBY_VERSION:-(not set; using primary)}"
+  _sep
+
+  # Container state
+  local state
+  state=$(docker compose --file "$COMPOSE_FILE" ps --status 2>/dev/null | grep 'docops' | awk '{print $NF}' || echo "not found")
+  if [[ "$state" == "running" ]]; then
+    _tick "Container: running"
+    local container_name="docopsbox_${slug}"
+    local image_ref
+    image_ref=$(docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || true)
+    if [[ -n "$image_ref" ]]; then
+      _tick "Running image: $image_ref"
+    fi
+  elif [[ "$state" == "exited" ]]; then
+    _warn "Container: stopped (run 'dxbx sh' to start)"
+  else
+    _warn "Container: not created"
+  fi
+
+  _sep
+  printf '%s\n' "$(_bold 'Volumes:')"
+  _print_project_volumes "$slug"
+
+  _print_project_readiness || return 1
+  printf '\n'
+}
+
+cmd_install() {
+  _check_help "${1:-}" "install" \
+    "Copy dxbx to ~/.local/bin/ for system-wide shell access." \
+    "dxbx install"
+
+  local script_path
+  # Prefer the canonical bin/ location relative to SCRIPT_DIR; fall back to
+  # SCRIPT_DIR itself (handles the installed copy at ~/.local/bin/dxbx).
+  if [[ -f "$SCRIPT_DIR/dxbx" ]]; then
+    script_path="$SCRIPT_DIR/dxbx"
+  else
+    script_path="${BASH_SOURCE[0]}"
+  fi
+  local install_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  local install_path="$install_dir/dxbx"
+
+  if [[ ! -f "$script_path" ]]; then
+    _fail "Cannot install: $script_path not found."
+    _info "Run dxbx install from the directory containing the dxbx script."
+    exit 1
+  fi
+
+  mkdir -p "$install_dir"
+
+  if [[ -e "$install_path" && ! -f "$install_path" ]]; then
+    _warn "$install_path already exists and is not a regular file."
+    if ! _confirm "Overwrite it?"; then
+      printf 'Install cancelled.\n'
+      exit 0
+    fi
+  fi
+
+  cp "$script_path" "$install_path"
+  chmod +x "$install_path"
+  _tick "Installed: $install_path (v${DOCOPSBOX_VERSION})"
+
+  # If the source was a one-off download rather than a project copy, offer to clean up.
+  if [[ "$script_path" != "$install_path" ]]; then
+    _info "You can delete the downloaded copy:  rm $(_bold "$script_path")"
+  fi
+
+  printf '\n'
+  _info "Next: run $(_bold 'dxbx init') in any project directory to set it up."
+
+  if [[ ":$PATH:" != *":$install_dir:"* ]]; then
+    printf '\n'
+    _warn "$install_dir is not in your current PATH."
+    _info "This is normal on a fresh system; the directory exists but your shell"
+    _info "session hasn't picked it up yet."
+    printf '\n'
+
+    # Detect the user's preferred rc file.
+    local rcfile=""
+    if [[ -f "$HOME/.zshrc" ]]; then
+      rcfile="$HOME/.zshrc"
+    elif [[ -f "$HOME/.bashrc" ]]; then
+      rcfile="$HOME/.bashrc"
+    elif [[ -f "$HOME/.bash_profile" ]]; then
+      rcfile="$HOME/.bash_profile"
+    fi
+
+    local export_line='export PATH="$HOME/.local/bin:$PATH"'
+
+    if [[ -n "$rcfile" ]]; then
+      if _confirm "Add $install_dir to PATH in $(_bold "$rcfile") automatically?"; then
+        # Only add if not already present (idempotent).
+        if ! grep -qF '.local/bin' "$rcfile" 2>/dev/null; then
+          printf '\n# Added by dxbx install\n%s\n' "$export_line" >> "$rcfile"
+          _tick "Added to $rcfile"
+        else
+          _tick "$rcfile already references .local/bin; no change needed."
+        fi
+        _info "Reload your shell to activate:  $(_bold "source $rcfile")"
+        _info "Or activate now:  $(_bold "$export_line")"
+      else
+        _info "To add manually, append this line to $rcfile:"
+        _info "  $export_line"
+      fi
+    else
+      _info "Add this line to your shell's rc file (~/.zshrc or ~/.bashrc):"
+      _info "  $export_line"
+      _info "Then reload your shell."
+    fi
+  else
+    _tick "$install_dir is already in PATH; run $(_bold 'dxbx') from anywhere."
+  fi
+
+  _require_ssh_agent
+}
+
+cmd_build() {
+  _check_help "${1:-}" "make" \
+    "Build a DocOps Box image locally (native platform; for development/testing)." \
+    "dxbx make [image-spec] [RUBY_VERSION=x.y] [BUILD_ARG=val...]" \
+    "  image-spec      Variant (min|max), context (work|live), or both (ex: max:work)" \
+    "  RUBY_VERSION    Any Ruby version (ex: 3.3, 3.4, 2.7); defaults to $DXBX_PRIMARY_RUBY" \
+    "  BUILD_ARG=val   Override any Dockerfile ARG (ex: ADD_PYTHON=false)"
+
+  _require_docker
+
+  # Dockerfile must be in the project root alongside this script.
+  # This works from a repo clone with the installed binary at SCRIPT_DIR/../..
+  # but fails for plain `dxbx make` without a Dockerfile present.
+  local project_root; project_root="$(cd "$SCRIPT_DIR/.." && pwd)"
+  local dockerfile="$project_root/Dockerfile"
+  if [[ ! -f "$dockerfile" ]]; then
+    _fail "Dockerfile not found at $dockerfile"
+    _info "dxbx make must be run from a clone of the DocOps Box repository."
+    _info "Clone it first:  git clone https://github.com/DocOps/box"
+    exit 1
+  fi
+
+  local variant="max"
+  local context="work"
+  local ruby="$DXBX_PRIMARY_RUBY"
+  local -a extra_build_args=()  # KEY=VALUE overrides from CLI
+
+  # Parse positional args: image-spec, RUBY_VERSION, and KEY=VALUE build-args.
+  while [[ $# -gt 0 ]]; do
+    if _is_image_spec "$1"; then
+      local spec="${1#box-}"
+      if [[ "$spec" == *:* ]]; then
+        variant="${spec%%:*}"
+        context="${spec##*:}"
+      else
+        local variants_pat; variants_pat="$(IFS='|'; printf '%s' "${DXBX_VARIANTS[*]}")"
+        local contexts_pat; contexts_pat="$(IFS='|'; printf '%s' "${DXBX_CONTEXTS[*]}")"
+        if [[ "$spec" =~ ^($variants_pat)$ ]]; then
+          variant="$spec"
+        elif [[ "$spec" =~ ^($contexts_pat)$ ]]; then
+          context="$spec"
+        fi
+      fi
+    elif [[ "$1" =~ ^[0-9]+\.[0-9]+(.[0-9]+)?$ ]]; then
+      ruby="$1"
+    elif [[ "$1" == *"="* ]]; then
+      extra_build_args+=("$1")
+    else
+      _fail "Invalid argument: $1"
+      _info "Run '$(_bold 'dxbx make --help')' for usage."
+      exit 1
+    fi
+    shift
+  done
+
+  # Warn when the requested Ruby version is not in the published matrix, but
+  # allow it; that is the explicit use case (e.g. legacy apps needing 2.7).
+  local known=false
+  local v; for v in "${DXBX_RUBY_VERSIONS[@]}"; do [[ "$v" == "$ruby" ]] && known=true; done
+  if [[ "$known" == false ]]; then
+    _warn "Ruby $ruby is not in the published matrix (${DXBX_RUBY_VERSIONS[*]})."
+    _info "Building anyway; the image will not have a registry counterpart."
+  fi
+
+  # Build the --build-arg list: variant defaults first, then CLI overrides.
+  # CLI KEY=VALUE args come last so they win over the variant defaults.
+  local -a build_args=()
+  while IFS= read -r arg; do
+    build_args+=("--build-arg" "$arg")
+  done < <(_variant_build_args "$variant")
+  build_args+=(
+    "--build-arg" "RUBY_VERSION=$ruby"
+    "--build-arg" "IMAGE_CONTEXT=$context"
+  )
+  local override; for override in "${extra_build_args[@]}"; do
+    build_args+=("--build-arg" "$override")
+  done
+
+  # Canonical tag; mirrors build-matrix.sh tag scheme.
+  local tag="$context"
+  [[ "$ruby" != "$DXBX_PRIMARY_RUBY" ]] && tag="${context}-${ruby}"
+  local image_ref="${IMAGE_REGISTRY:-docopslab}/box-${variant}:${tag}"
+
+  _sep
+  _info "Building: $(_bold "$image_ref")"
+  _info "Variant:  $variant  |  Context: $context  |  Ruby: $ruby"
+  [[ ${#extra_build_args[@]} -gt 0 ]] && _info "Overrides: ${extra_build_args[*]}"
+  _sep
+
+  _run_echo "docker build --file $dockerfile ${build_args[*]} --tag $image_ref $project_root"
+  docker build --file "$dockerfile" "${build_args[@]}" --tag "$image_ref" "$project_root"
+
+  _tick "Built: $image_ref"
+  _info "To use this image, set RUBY_VERSION=$ruby in .config/.env (or run: RUBY_VERSION=$ruby dxbx up)"
+}
+
+cmd_update() {
+  _check_help "${1:-}" "reup" \
+    "Download the latest dxbx and pull the latest image for this project." \
+    "dxbx reup [--force] [image-spec]" \
+    "  --force     Skip version check and confirmation prompts" \
+    "  image-spec  Optional. Pull a specific variant/context instead of the configured default."
+
+  local force=false
+  if [[ "${1:-}" == "--force" ]]; then
+    force=true
+    shift
+  fi
+
+  # Optional image-spec shifts IMAGE_VARIANT/IMAGE_CONTEXT for the pull half only.
+  # Must be captured before _load_env so they survive as shell-level overrides.
+  if [[ $# -gt 0 ]] && _is_image_spec "$1"; then
+    _parse_image_spec "$1"; shift
+  fi
+
+  local upstream_raw="https://raw.githubusercontent.com/DocOps/box/latest"
+  local install_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  local install_path="$install_dir/dxbx"
+
+  # Script update
+  printf '\n%s\n' "$(_bold 'Checking for dxbx update...')"
+
+  # Fetch upstream script to a temp file
+  local tmpfile; tmpfile=$(mktemp)
+  # shellcheck disable=SC2064
+  trap "rm -f '$tmpfile'" EXIT
+
+  if ! _fetch "$upstream_raw/bin/dxbx" > "$tmpfile" 2>/dev/null; then
+    _fail "Could not reach upstream. Check your internet connection."
+    exit 1
+  fi
+
+  # Extract version from upstream script
+  local upstream_ver
+  upstream_ver=$(grep -m1 '^DOCOPSBOX_VERSION=' "$tmpfile" | sed 's/DOCOPSBOX_VERSION=//;s/"//g')
+  if [[ -z "$upstream_ver" ]]; then
+    _fail "Could not determine upstream version. The download may be corrupt."
+    exit 1
+  fi
+
+  printf '  %-18s %s\n' "Installed:" "v${DOCOPSBOX_VERSION}"
+  printf '  %-18s %s\n' "Upstream:"  "v${upstream_ver}"
+
+  if [[ "$upstream_ver" == "$DOCOPSBOX_VERSION" ]] && [[ "$force" == false ]]; then
+    _tick "dxbx is already up to date."
+  else
+    printf '\n'
+    local prompt_msg
+    if [[ "$upstream_ver" == "$DOCOPSBOX_VERSION" ]]; then
+      prompt_msg="Reinstall dxbx v${upstream_ver}?"
+    else
+      prompt_msg="Update dxbx from v${DOCOPSBOX_VERSION} to v${upstream_ver}?"
+    fi
+    if _confirm "$prompt_msg"; then
+      # Only update the central install. Never overwrite a project's bin/dxbx or a
+      # contributor's working copy; those should be updated via `git pull`.
+      if [[ ! -f "$install_path" ]]; then
+        _fail "No installed binary found at $install_path."
+        _info "Run $(_bold 'dxbx install') first, then use $(_bold 'dxbx reup') to keep it current."
+        exit 1
+      fi
+      # Verify the downloaded script is a valid bash file before replacing the
+      # installed binary. Protects against truncated or corrupt downloads.
+      if ! bash -n "$tmpfile" 2>/dev/null; then
+        _fail "Downloaded script failed validation; it may be corrupt or truncated."
+        _info "The installed version has not been changed. Try again."
+        exit 1
+      fi
+      cp "$tmpfile" "$install_path"
+      chmod +x "$install_path"
+      if [[ "$upstream_ver" == "$DOCOPSBOX_VERSION" ]]; then
+        _tick "Reinstalled: $install_path (v${upstream_ver})"
+      else
+        _tick "Updated: $install_path → v${upstream_ver}"
+      fi
+      # Clear the shell's command-path cache so the new binary is found immediately
+      # without needing to open a new terminal.
+      hash -r 2>/dev/null || rehash 2>/dev/null || true
+    else
+      printf 'dxbx reup skipped.\n'
+    fi
+  fi
+
+  # Image update
+  printf '\n%s\n' "$(_bold 'Checking for image update...')"
+
+  # Running inside a container: the image can't update itself.
+  if [[ -f /.dockerenv ]]; then
+    _info "Running inside a container; image update must be run from the host."
+    _info "Exit the container and run $(_bold 'dxbx reup') from your project directory."
+    return 0
+  fi
+
+  if [[ ! -f "$COMPOSE_FILE" ]]; then
+    _info "Not in a DocOps Box project directory; skipping image update."
+    _info "Run $(_bold 'dxbx reup') from your project directory to also update the image."
+    return 0
+  fi
+
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  local image_tag; image_tag=$(_resolve_image_ref)
+  printf '  %-18s %s\n' "Image:" "$image_tag"
+  printf '\n'
+
+  if [[ "$force" == true ]] || _confirm "Pull latest ${image_tag}?"; then
+    _compose pull docops
+    _tick "Image up to date. Run '$(_bold 'dxbx up')' or reopen the Dev Container to use it."
+  else
+    printf 'Image update skipped.\n'
+  fi
+}
+
+cmd_pull() {
+  _check_help "${1:-}" "pull" \
+    "Pull a Docker image for this project without updating the dxbx script." \
+    "dxbx pull [--force] [image-spec]" \
+    "  --force     Skip confirmation prompt" \
+    "  image-spec  Optional. Variant (min|max), context (work|live), or both: min:live" \
+    "dxbx pull 3.4 # pull a specific Ruby version image"
+
+  local force=false
+  if [[ "${1:-}" == "--force" ]]; then
+    force=true
+    shift
+  fi
+
+  if [[ $# -gt 0 ]] && _is_image_spec "$1"; then
+    _parse_image_spec "$1"; shift
+  fi
+
+  if [[ -f /.dockerenv ]]; then
+    _fail "Running inside a container; run dxbx pull from the host."
+    exit 1
+  fi
+
+  if [[ ! -f "$COMPOSE_FILE" ]]; then
+    _fail "Not in a DocOps Box project directory."
+    _info "Change to your project directory and try again."
+    exit 1
+  fi
+
+  _require_docker
+  _load_env
+  local slug; slug=$(_resolve_slug)
+  export PROJECT_SLUG="$slug"
+  local image_tag; image_tag=$(_resolve_image_ref)
+  printf '\n  %-18s %s\n\n' "Image:" "$image_tag"
+
+  if [[ "$force" == true ]] || _confirm "Pull latest ${image_tag}?"; then
+    _compose pull docops
+    _tick "Image up to date. Run '$(_bold 'dxbx up')' to use it."
+  else
+    printf 'Pull skipped.\n'
+  fi
+}
+
+cmd_code() {
+  _check_help "${1:-}" "vsc" \
+    "Open VS Code in the current directory (or path), directly in a Dev Container if configured." \
+    "dxbx vsc [path]  (alias: dxbx code)"
+
+  if ! command -v code > /dev/null 2>&1; then
+    _fail "VS Code ('code' command) not found in PATH."
+    _info "Install VS Code: https://code.visualstudio.com"
+    _info "On macOS: Command Palette → 'Shell Command: Install code command in PATH'."
+    exit 1
+  fi
+
+  local target="${1:-.}"
+  local abs_target
+  abs_target="$(cd "$target" 2>/dev/null && pwd)" || {
+    _fail "Cannot resolve path: $target"
+    exit 1
+  }
+
+  # If a .devcontainer/devcontainer.json exists, open directly in the Dev Container
+  # using the vscode-remote URI — no manual "Reopen in Container" prompt needed.
+  # --new-window is required to prevent VS Code reusing a window already attached
+  # to a different container (e.g. another project open in a dev container).
+  local -a code_args=(--new-window)
+  if [[ -f "$abs_target/.devcontainer/devcontainer.json" ]]; then
+    local devcontainer_json="$abs_target/.devcontainer/devcontainer.json"
+    local workspace
+    workspace=$(grep -o '"workspaceFolder"[[:space:]]*:[[:space:]]*"[^"]*"' \
+                  "$devcontainer_json" 2>/dev/null \
+                | sed 's/.*"\([^"]*\)"$/\1/')
+    workspace="${workspace:-/workspace}"
+    # VS Code requires a hex-encoded JSON object as the URI authority — not just
+    # the path. Discovered by decoding workspace.json from a working devcontainer.
+    local json hex
+    json="{\"hostPath\":\"${abs_target}\",\"localDocker\":false,\"configFile\":{\"\$mid\":1,\"fsPath\":\"${devcontainer_json}\",\"external\":\"file://${devcontainer_json}\",\"path\":\"${devcontainer_json}\",\"scheme\":\"file\"}}"
+    hex=$(printf '%s' "$json" | od -A n -t x1 | tr -d ' \n')
+    code_args+=(--folder-uri "vscode-remote://dev-container+${hex}${workspace}")
+    _info "Opening Dev Container: $abs_target"
+    _require_docker
+    _ensure_history_volume
+  else
+    code_args+=("$abs_target")
+  fi
+
+  # On macOS & WSL2, Docker access is transparent; launch code directly.
+  if [[ "$(uname)" == "Darwin" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
+    exec code "${code_args[@]}"
+  fi
+
+  # Native Linux: activate docker group if needed so the Dev Containers extension
+  # can reach the Docker daemon without requiring a logout.
+  if command -v sg > /dev/null 2>&1 && \
+     grep -qE "^docker:.*\b${USER}\b" /etc/group 2>/dev/null && \
+     ! id -Gn 2>/dev/null | grep -qw docker; then
+    _info "Launching VS Code with docker group active (no logout required)."
+    local code_cmd="code"
+    local arg; for arg in "${code_args[@]}"; do code_cmd+=" $(printf '%q' "$arg")"; done
+    exec sg docker -c "$code_cmd"
+  fi
+
+  exec code "${code_args[@]}"
+}
+
+cmd_uninstall() {
+  _check_help "${1:-}" "uninstall" \
+    "Remove the installed dxbx binary, data directory, Docker volumes, and images." \
+    "dxbx uninstall"
+
+  local install_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  local install_path="$install_dir/dxbx"
+  local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/docopslab/dxbx"
+
+  printf '\n%s\n' "$(_bold 'dxbx uninstall')"
+  _sep
+  printf '\n'
+  local removed_anything=false
+
+  # 1. Binary
+  if [[ -f "$install_path" ]]; then
+    if _confirm "Remove installed binary ($install_path)?"; then
+      rm -f "$install_path"
+      _tick "Removed: $install_path"
+      removed_anything=true
+    fi
+  else
+    _info "No installed binary found at $install_path"
+  fi
+
+  # 2. Data directory (backups, etc.)
+  if [[ -d "$data_dir" ]]; then
+    local backup_count
+    backup_count=$(find "$data_dir" -maxdepth 2 -type f 2>/dev/null | wc -l | tr -d ' ')
+    printf '\n'
+    _warn "Data directory: $data_dir"
+    [[ "$backup_count" -gt 0 ]] && _warn "  Contains $backup_count file(s) (history backups, etc.)"
+    if _confirm "Remove data directory and all its contents?"; then
+      rm -rf "$data_dir"
+      _tick "Removed: $data_dir"
+      removed_anything=true
+    fi
+  fi
+
+  # 3. Docker volumes
+  if docker info > /dev/null 2>&1; then
+    local all_vols
+    mapfile -t all_vols < <(docker volume ls --format '{{.Name}}' 2>/dev/null | grep '^docops-' | sort)
+    if [[ ${#all_vols[@]} -gt 0 ]]; then
+      printf '\n'
+      _warn "DocOps Box Docker volumes found:"
+      for vol in "${all_vols[@]}"; do
+        local sz
+        sz=$(docker run --rm -v "${vol}:/data" alpine du -sh /data 2>/dev/null | awk '{print $1}' || echo "?")
+        if [[ "$vol" == "docops-shell-history" ]]; then
+          _warn "  $(printf '%-44s %-6s  PRECIOUS: contains your Zsh shell history' "$vol" "$sz")"
+        else
+          _info "  $(printf '%-44s %s' "$vol" "$sz")"
+        fi
+      done
+      printf '\n'
+      _warn "Volumes cannot be recovered after deletion."
+      _warn "Run $(_bold 'dxbx back') first to save your shell history."
+      if _confirm "Remove ALL ${#all_vols[@]} DocOps Box volume(s)?"; then
+        if _confirm "Double-confirm: permanently delete all DocOps Box volumes?"; then
+          _run_echo "docker volume rm ${all_vols[*]}"
+          docker volume rm "${all_vols[@]}" 2>/dev/null || true
+          _tick "All DocOps Box volumes removed."
+          removed_anything=true
+        else
+          _info "Volume removal cancelled."
+        fi
+      fi
+    else
+      _info "No DocOps Box volumes found."
+    fi
+
+    # 4. Docker images
+    local all_images
+    mapfile -t all_images < <(docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' 2>/dev/null \
+      | grep -E '^[^/]*/box-' | sort)
+    if [[ ${#all_images[@]} -gt 0 ]]; then
+      printf '\n'
+      _warn "DocOps Box Docker images found:"
+      while IFS=$'\t' read -r tag sz; do
+        _info "  $(printf '%-44s %s' "$tag" "$sz")"
+      done < <(printf '%s\n' "${all_images[@]}")
+      if _confirm "Remove ALL ${#all_images[@]} DocOps Box image(s)?"; then
+        local image_tags=()
+        while IFS=$'\t' read -r tag _; do image_tags+=("$tag"); done \
+          < <(printf '%s\n' "${all_images[@]}")
+        _run_echo "docker rmi ${image_tags[*]}"
+        docker rmi "${image_tags[@]}" 2>/dev/null || true
+        _tick "DocOps Box images removed."
+        removed_anything=true
+      fi
+    else
+      _info "No DocOps Box images found."
+    fi
+  else
+    _info "Docker not available; skipping volume and image cleanup."
+  fi
+
+  # Summary
+  printf '\n'
+  _sep
+  if [[ "$removed_anything" == true ]]; then
+    _tick "Uninstall complete."
+    _info "Project files (.config/.env, docopsbox.yml, .devcontainer/) are untouched."
+  else
+    _info "Nothing was removed."
+  fi
+}
+
+# HELP
+
+cmd_help() {
+  cat <<EOF
+
+$(_bold 'dxbx') DocOps Box workspace manager (v${DOCOPSBOX_VERSION})
+
+$(_bold 'Usage:')
+  dxbx <command> [specs] [options]
+
+$(_bold 'Setup commands:')
+  $(_bold 'init')              Bootstrap a project directory with DocOps Box config files
+  $(_bold 'reup')              Download the latest dxbx and pull the latest image  (alias: update)
+  $(_bold 'pull') [spec]       Pull the project image only (no dxbx script update)
+  $(_bold 'install')           Copy dxbx to ~/.local/bin/ for system-wide shell access
+  $(_bold 'uninstall')         Remove the installed binary and data directory (backups, etc.)
+
+$(_bold 'Workspace commands:')
+  $(_bold 'up') [spec]         Start an interactive session (new container, removed on exit)  (alias: run)
+  $(_bold 'sh') [spec]         Enter an interactive shell in the running container  (alias: shell)
+  $(_bold 'ex') [spec] <cmd>   Run a command inside the container  (alias: exec)
+  $(_bold 'vsc')               Open VS Code; opens directly in Dev Container if .devcontainer/ present  (alias: code)
+  $(_bold 'stop')              Stop the persistent container (dxbx sh / VS Code); not for dxbx up  (alias: down)
+
+$(_bold 'Management commands:')
+  $(_bold 'list')              List all DocOps Box-managed containers and volumes
+  $(_bold 'stat')              Show container state, volume sizes, and readiness checks  (alias: status)
+  $(_bold 'wipe')              Remove stopped containers (keep all volumes)  (alias: clean)
+  $(_bold 'wipe --vols')       Remove container and dependency caches (gems, node, python); preserve history
+  $(_bold 'wipe --hist')       Remove container, caches, AND shell history (double-confirmed)
+  $(_bold 'back')              Save shell history to ~/.local/share/docopslab/dxbx/backups/  (alias: backup)
+  $(_bold 'back --undo')       Restore shell history from a backup (append or replace)
+  $(_bold 'logs')              Show recent container logs
+  $(_bold 'make')              Build a DocOps Box image locally (for developers/testing)  (alias: build)
+
+$(_bold 'Configuration:')
+  Edit $(_bold '.config/.env') for project settings (PROJECT_SLUG, IMAGE_VARIANT, RUBY_VERSION, etc.)
+  Create $(_bold '.config/.env.local') (gitignored) for host-specific overrides (HOST_UID, HOST_GID).
+
+EOF
+}
+
+# DISPATCH
+# Guard: skip when this file is sourced (e.g. by build-matrix.sh to import
+# constants and helpers). Only execute the dispatch block when run directly.
+[[ "${BASH_SOURCE[0]}" != "$0" ]] && return 0
+
+# Load x-docopsbox settings from the compose file if it exists.
+# Must run after COMPOSE_FILE is resolved (top of script) and before any
+# command fires so display settings are in effect for the whole invocation.
+# Skip for commands that don't need the compose file and run before init.
+_read_compose_ext
+
+COMMAND="${1:-help}"
+shift || true
+
+case "$COMMAND" in
+  init)                   cmd_init "$@" ;;
+  install)                cmd_install "$@" ;;
+  reup|update)            cmd_update "$@" ;;
+  make|build)             cmd_build "$@" ;;
+  pull)                   cmd_pull "$@" ;;
+  uninstall)              cmd_uninstall "$@" ;;
+  up|run)                 cmd_run "$@" ;;
+  sh|shell)               cmd_shell "$@" ;;
+  ex|exec)                cmd_exec "$@" ;;
+  vsc|code)               cmd_code "$@" ;;
+  stop|down)              cmd_stop "$@" ;;
+  wipe|clean)             cmd_wipe "$@" ;;
+  back|backup)            cmd_back "$@" ;;
+  logs)                   cmd_logs "$@" ;;
+  list)                   cmd_list "$@" ;;
+  stat|status)            cmd_status "$@" ;;
+  help|--help|-h)         cmd_help ;;
+  --version|-v)           printf 'dxbx %s\n' "$DOCOPSBOX_VERSION" ;;
+  *)
+    _fail "Unknown command: $COMMAND"
+    _info "Run '$(_bold 'dxbx help')' for usage."
+    exit 1
+    ;;
+esac

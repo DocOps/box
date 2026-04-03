@@ -1,0 +1,74 @@
+# DocOps Box — Docker Compose service definition
+# Edit .env to configure PROJECT_SLUG, image variant, Ruby version, etc.
+# For machine-local overrides, create .env.local (git-ignored).
+# See README.adoc for full documentation.
+
+name: docops-${PROJECT_SLUG:-project}
+
+services:
+  docops:
+    env_file:
+      - .env
+      - path: .env.local
+        required: false
+    image: ${IMAGE_REGISTRY:-docopslab}/box-${IMAGE_VARIANT:-max}:${IMAGE_TAG:-work}
+    container_name: docopsbox_${PROJECT_SLUG:-project}
+    environment:
+      # Passed to entrypoint.sh for UID/GID reconciliation at container startup.
+      # On Linux, dxbx sets these automatically from `id -u` / `id -g`.
+      # On macOS with Docker Desktop, the VM provides transparent ownership mapping
+      # and these can be left unset.
+      HOST_UID: ${HOST_UID:-}
+      HOST_GID: ${HOST_GID:-}
+      RUN_USER: ${RUN_USER:-appuser}
+      IMAGE_CONTEXT: ${IMAGE_CONTEXT:-work}
+      DOCOPSBOX_IMAGE_ID: ${DOCOPSBOX_IMAGE_ID:-}
+      DOCOPSBOX_IMAGE_DIGEST: ${DOCOPSBOX_IMAGE_DIGEST:-}
+    volumes:
+      # ..:/workspace because this compose file lives in .config/; .. resolves
+      # to the project root which is what we want to mount as the workspace.
+      # :z applies a shared SELinux label so Fedora/RHEL with SELinux enforcing
+      # allows the bind mount. It is a no-op on macOS and Windows/Docker Desktop.
+      - ..:/workspace:z
+      - docops-shell-history:/commandhistory
+      - docops-project-bundle:/usr/local/bundle
+      # Per-project Node.js and Python dependency volumes. Named volumes keep
+      # platform-native binaries (Linux builds) isolated from the host filesystem
+      # and persistent across container restarts without polluting the workspace.
+      - docops-project-node:/workspace/node_modules
+      - docops-project-python:/opt/venv
+      # Shared npm and pip download caches. Mounted at the fixed paths set by
+      # npm_config_cache and PIP_CACHE_DIR in the image. Shared across all
+      # projects so downloading a package once benefits all local projects.
+      - docops-npm-cache:/npm-cache
+      - docops-pip-cache:/pip-cache
+    working_dir: /workspace
+    # tty: true keeps the container alive when docker compose up runs without an
+    # interactive terminal (e.g., VS Code Dev Containers). The Dev Containers
+    # extension overrides this command, but tty: true is a defensive safeguard.
+    tty: true
+    command: zsh
+    # Uncomment to forward local ports (e.g., Jekyll server):
+    # ports:
+    #   - "4000:4000"
+    labels:
+      dxbx.managed: "true"
+      dxbx.project_slug: ${PROJECT_SLUG:-project}
+
+volumes:
+  # Volumes are local only; they are not pushed/pulled with Git or Docker images.
+  docops-shell-history: # Persists across resets.
+    external: true # shared across projects, locally only
+    name: docops-shell-history
+  docops-project-bundle:
+    name: docops-${PROJECT_SLUG:-project}-bundle
+  docops-project-node:
+    name: docops-${PROJECT_SLUG:-project}-node
+  docops-project-python:
+    name: docops-${PROJECT_SLUG:-project}-python
+  docops-npm-cache:
+    external: true # non-exclusive per project
+    name: docops-npm-cache
+  docops-pip-cache:
+    external: true # non-exclusive per project
+    name: docops-pip-cache
