@@ -43,6 +43,13 @@ jobs:
       - name: Generate agent docs
         run: bundle exec rake gen_agent_docs
 
+      - name: Backup agent docs
+        run: |
+          # Save generated docs to a temp location before branch switch
+          mkdir -p /tmp/agent-docs-backup
+          cp -r docs/agent/* /tmp/agent-docs-backup/
+          echo "✅ Agent docs backed up"
+
       - name: Setup agent-docs branch
         run: |
           # Check if agent-docs branch exists
@@ -58,15 +65,15 @@ jobs:
 
       - name: Copy agent docs
         run: |
-          # Start fresh - remove everything
+          # Start fresh - remove everything except .git
           find . -maxdepth 1 ! -name '.git' ! -name '.' ! -name '..' -exec rm -rf {} +
 
-          # Copy agent docs from source
-          if [ -d "docs/agent" ]; then
-            cp -r docs/agent/* .
-            echo "✅ Agent docs copied"
+          # Restore agent docs from backup
+          if [ -d "/tmp/agent-docs-backup" ]; then
+            cp -r /tmp/agent-docs-backup/* .
+            echo "✅ Agent docs restored from backup"
           else
-            echo "❌ Agent docs not found at docs/agent"
+            echo "❌ Agent docs backup not found"
             exit 1
           fi
 
