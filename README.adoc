@@ -556,6 +556,7 @@ Both commands should print a version number with no errors before you continue.
 // end::prerequisites-linux[]
 // end::agent-prerequisite-guidance[]
 
+
 [[quickstart]]
 == DocOps in a Box: Quick-start Guide
 
@@ -2391,6 +2392,7 @@ DocOps Box is maintained by link:https://github.com/DocOps[DocOps Lab].
 
 . Clone the repo.
 +
+[.prompt,subs=+attributes]
  git clone {this_proj_src_git_uri}
 
 . Build a permutation of the image.

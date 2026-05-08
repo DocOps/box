@@ -48,8 +48,6 @@ tools:
         - .bundle/**/*
         - .config/**/*
         - specs/tests/**/*
-        - docs/agent/**/*
-        - docs/agent-guide.adoc
       exts: ['adoc']
 
   - tool: htmlproofer
