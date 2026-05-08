@@ -1,0 +1,473 @@
+{
+  "docs/agent/readme.md": {
+    "title": "DocOps Box",
+    "frontmatter": {},
+    "sections_flat": [
+      {
+        "text": "Introduction",
+        "level": 1,
+        "starts_at": 62
+      },
+      {
+        "text": "Tooling Overview",
+        "level": 2,
+        "starts_at": 83
+      },
+      {
+        "text": "When to Use DocOps Box",
+        "level": 2,
+        "starts_at": 147
+      },
+      {
+        "text": "Host Install vs DocOps Box",
+        "level": 2,
+        "starts_at": 192
+      },
+      {
+        "text": "Prerequisites",
+        "level": 1,
+        "starts_at": 252
+      },
+      {
+        "text": "Terminal App (All OSes; Advised)",
+        "level": 2,
+        "starts_at": 275
+      },
+      {
+        "text": "Warp and Wave",
+        "level": 3,
+        "starts_at": 284
+      },
+      {
+        "text": "Host Terminal Apps",
+        "level": 3,
+        "starts_at": 298
+      },
+      {
+        "text": "VS Code (All OSes; Advised)",
+        "level": 2,
+        "starts_at": 309
+      },
+      {
+        "text": "Bash 4+ (MacOS Only)",
+        "level": 2,
+        "starts_at": 356
+      },
+      {
+        "text": "WSL2 (Windows Only)",
+        "level": 2,
+        "starts_at": 369
+      },
+      {
+        "text": "Curl (All Hosts; Required)",
+        "level": 2,
+        "starts_at": 389
+      },
+      {
+        "text": "Docker (All OSes)",
+        "level": 2,
+        "starts_at": 409
+      },
+      {
+        "text": "Docker on Windows (WSL2)",
+        "level": 3,
+        "starts_at": 416
+      },
+      {
+        "text": "Docker on MacOS",
+        "level": 3,
+        "starts_at": 423
+      },
+      {
+        "text": "Docker on Linux (non-WSL)",
+        "level": 3,
+        "starts_at": 430
+      },
+      {
+        "text": "DocOps in a Box: Quick-start Guide",
+        "level": 1,
+        "starts_at": 460
+      },
+      {
+        "text": "Quickest Start",
+        "level": 2,
+        "starts_at": 465
+      },
+      {
+        "text": "Step 1: Install dxbx (once, system-wide)",
+        "level": 2,
+        "starts_at": 484
+      },
+      {
+        "text": "Step 2: Initialize your project (optional)",
+        "level": 2,
+        "starts_at": 512
+      },
+      {
+        "text": "Step 3: Test dxbx with default image",
+        "level": 2,
+        "starts_at": 536
+      },
+      {
+        "text": "Step 4: Start working",
+        "level": 2,
+        "starts_at": 553
+      },
+      {
+        "text": "Using Your New Environment",
+        "level": 1,
+        "starts_at": 568
+      },
+      {
+        "text": "Understanding Your Shells",
+        "level": 2,
+        "starts_at": 575
+      },
+      {
+        "text": "Volume Lifecycle",
+        "level": 2,
+        "starts_at": 714
+      },
+      {
+        "text": "Volume Management Commands",
+        "level": 3,
+        "starts_at": 742
+      },
+      {
+        "text": "Per-invocation Image Overrides",
+        "level": 2,
+        "starts_at": 780
+      },
+      {
+        "text": "Example commands",
+        "level": 3,
+        "starts_at": 825
+      },
+      {
+        "text": "Adding Runtime Dependencies",
+        "level": 2,
+        "starts_at": 862
+      },
+      {
+        "text": "Open a server port",
+        "level": 2,
+        "starts_at": 917
+      },
+      {
+        "text": "Configuration Reference",
+        "level": 1,
+        "starts_at": 945
+      },
+      {
+        "text": "Environment Variables (.config/.env)",
+        "level": 2,
+        "starts_at": 961
+      },
+      {
+        "text": "Secret Environment Variables (.config/.env.local)",
+        "level": 2,
+        "starts_at": 1015
+      },
+      {
+        "text": "Project Slug Resolution Order",
+        "level": 2,
+        "starts_at": 1048
+      },
+      {
+        "text": "Image Variants and Contexts",
+        "level": 2,
+        "starts_at": 1057
+      },
+      {
+        "text": "Docker Compose Configuration (docopsbox.yml)",
+        "level": 2,
+        "starts_at": 1105
+      },
+      {
+        "text": "Key configuration",
+        "level": 3,
+        "starts_at": 1110
+      },
+      {
+        "text": "VS Code Dev Container Configuration (.devcontainer/devcontainer.json)",
+        "level": 2,
+        "starts_at": 1118
+      },
+      {
+        "text": "Troubleshooting",
+        "level": 1,
+        "starts_at": 1125
+      },
+      {
+        "text": "Start with Diagnostics",
+        "level": 2,
+        "starts_at": 1127
+      },
+      {
+        "text": "Common Issues",
+        "level": 2,
+        "starts_at": 1145
+      },
+      {
+        "text": "Extending DocOps Box",
+        "level": 1,
+        "starts_at": 1209
+      },
+      {
+        "text": "Custom Image Builds",
+        "level": 2,
+        "starts_at": 1218
+      },
+      {
+        "text": "Use docker build arguments",
+        "level": 3,
+        "starts_at": 1226
+      },
+      {
+        "text": "Quickie builds with dxbx commands",
+        "level": 3,
+        "starts_at": 1239
+      },
+      {
+        "text": "Use a custom image with dxbx and Dev Containers",
+        "level": 3,
+        "starts_at": 1265
+      },
+      {
+        "text": "Appendices",
+        "level": 1,
+        "starts_at": 1283
+      },
+      {
+        "text": "Appendix A: Who is This Software For?",
+        "level": 2,
+        "starts_at": 1285
+      },
+      {
+        "text": "Appendix B: Glossary",
+        "level": 2,
+        "starts_at": 1309
+      },
+      {
+        "text": "Domain jargon and idioms",
+        "level": 3,
+        "starts_at": 1314
+      },
+      {
+        "text": "Docker and container concepts",
+        "level": 3,
+        "starts_at": 1363
+      },
+      {
+        "text": "System and shell concepts",
+        "level": 3,
+        "starts_at": 1422
+      },
+      {
+        "text": "Runtime and dependency management",
+        "level": 3,
+        "starts_at": 1476
+      },
+      {
+        "text": "Abbreviations and tooling terms",
+        "level": 3,
+        "starts_at": 1514
+      },
+      {
+        "text": "Appendix C: Auxiliary Tools",
+        "level": 2,
+        "starts_at": 1552
+      },
+      {
+        "text": "Sample Commands: Asciidoctor",
+        "level": 3,
+        "starts_at": 1639
+      },
+      {
+        "text": "Sample Commands: Kramdown-AsciiDoc",
+        "level": 3,
+        "starts_at": 1658
+      },
+      {
+        "text": "Sample Commands: Nokogiri",
+        "level": 3,
+        "starts_at": 1665
+      },
+      {
+        "text": "Sample Commands: Tilt",
+        "level": 3,
+        "starts_at": 1682
+      },
+      {
+        "text": "Sample Commands: Redocly CLI",
+        "level": 3,
+        "starts_at": 1698
+      },
+      {
+        "text": "LibreOffice tools",
+        "level": 3,
+        "starts_at": 1713
+      },
+      {
+        "text": "Key capabilities comparison",
+        "level": 4,
+        "starts_at": 1719
+      },
+      {
+        "text": "Use soffice for:",
+        "level": 4,
+        "starts_at": 1834
+      },
+      {
+        "text": "Use unoserver when you need:",
+        "level": 4,
+        "starts_at": 1843
+      },
+      {
+        "text": "Sample LibreOffice commands",
+        "level": 4,
+        "starts_at": 1853
+      },
+      {
+        "text": "Appendix D: Installing Everything to Host",
+        "level": 2,
+        "starts_at": 1899
+      },
+      {
+        "text": "Why Not?",
+        "level": 3,
+        "starts_at": 1922
+      },
+      {
+        "text": "Auxiliary tools and host-side installs",
+        "level": 3,
+        "starts_at": 1947
+      },
+      {
+        "text": "Use Everything Natively",
+        "level": 3,
+        "starts_at": 1981
+      },
+      {
+        "text": "Windows Users",
+        "level": 4,
+        "starts_at": 1988
+      },
+      {
+        "text": "[SIDEBAR] Truly Native Windows Dev Environment",
+        "level": 4,
+        "starts_at": 1994
+      },
+      {
+        "text": "MacOS Users",
+        "level": 4,
+        "starts_at": 2011
+      },
+      {
+        "text": "Linux Users (Including WSL)",
+        "level": 4,
+        "starts_at": 2032
+      },
+      {
+        "text": "Use a Ruby management system",
+        "level": 3,
+        "starts_at": 2047
+      },
+      {
+        "text": "[SIDEBAR] So, Which Ruby Version?",
+        "level": 4,
+        "starts_at": 2057
+      },
+      {
+        "text": "Add Ruby gems globally",
+        "level": 3,
+        "starts_at": 2078
+      },
+      {
+        "text": "Node.js",
+        "level": 3,
+        "starts_at": 2091
+      },
+      {
+        "text": "Python",
+        "level": 3,
+        "starts_at": 2104
+      },
+      {
+        "text": "Pandoc",
+        "level": 3,
+        "starts_at": 2113
+      },
+      {
+        "text": "Vale",
+        "level": 3,
+        "starts_at": 2122
+      },
+      {
+        "text": "LibreOffice CLI",
+        "level": 3,
+        "starts_at": 2129
+      },
+      {
+        "text": "Redocly CLI",
+        "level": 3,
+        "starts_at": 2138
+      },
+      {
+        "text": "Other environment customizations",
+        "level": 3,
+        "starts_at": 2147
+      },
+      {
+        "text": "Appendix E: Background and Context",
+        "level": 2,
+        "starts_at": 2223
+      },
+      {
+        "text": "Threading the needle with Docker",
+        "level": 3,
+        "starts_at": 2230
+      },
+      {
+        "text": "Why not the alternatives?",
+        "level": 3,
+        "starts_at": 2249
+      },
+      {
+        "text": "Why Ruby?",
+        "level": 3,
+        "starts_at": 2279
+      },
+      {
+        "text": "Why Zsh?",
+        "level": 3,
+        "starts_at": 2292
+      },
+      {
+        "text": "Architecture Decision Rationale",
+        "level": 3,
+        "starts_at": 2305
+      },
+      {
+        "text": "Appendix F: Development and Contribution",
+        "level": 2,
+        "starts_at": 2339
+      },
+      {
+        "text": "Building Locally",
+        "level": 3,
+        "starts_at": 2344
+      },
+      {
+        "text": "Smoke Tests",
+        "level": 3,
+        "starts_at": 2351
+      },
+      {
+        "text": "Contributing",
+        "level": 3,
+        "starts_at": 2365
+      }
+    ]
+  }
+}

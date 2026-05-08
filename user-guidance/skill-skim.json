@@ -1,0 +1,102 @@
+{
+  "docs/agent/user-guidance/SKILL.md": {
+    "title": "LLM Agent Guide",
+    "frontmatter": {
+      "name": "user-guidance",
+      "description": "Help users successfully install and engage the `dxbx` CLI and the Docker/VS Code Dev Container environment it manages.",
+      "tables-to-markdown": "true"
+    },
+    "sections_flat": [
+      {
+        "text": "The Project",
+        "level": 1,
+        "starts_at": 14
+      },
+      {
+        "text": "Prerequisites",
+        "level": 1,
+        "starts_at": 23
+      },
+      {
+        "text": "Installation",
+        "level": 1,
+        "starts_at": 33
+      },
+      {
+        "text": "Project Initialization",
+        "level": 1,
+        "starts_at": 50
+      },
+      {
+        "text": "Configuration",
+        "level": 1,
+        "starts_at": 64
+      },
+      {
+        "text": "Environment Variables (.config/.env)",
+        "level": 2,
+        "starts_at": 66
+      },
+      {
+        "text": "Secret Environment Variables (.config/.env.local)",
+        "level": 2,
+        "starts_at": 83
+      },
+      {
+        "text": "Project Slug Resolution Order",
+        "level": 2,
+        "starts_at": 96
+      },
+      {
+        "text": "Image Selection",
+        "level": 2,
+        "starts_at": 105
+      },
+      {
+        "text": "Per-invocation Overrides",
+        "level": 3,
+        "starts_at": 107
+      },
+      {
+        "text": "Examples",
+        "level": 3,
+        "starts_at": 160
+      },
+      {
+        "text": "Image Variants and Contexts",
+        "level": 3,
+        "starts_at": 213
+      },
+      {
+        "text": "Commands Reference",
+        "level": 1,
+        "starts_at": 266
+      },
+      {
+        "text": "Volume Management",
+        "level": 2,
+        "starts_at": 268
+      },
+      {
+        "text": "Volumes and Persistence",
+        "level": 1,
+        "starts_at": 281
+      },
+      {
+        "text": "Named Volumes",
+        "level": 2,
+        "starts_at": 283
+      },
+      {
+        "text": "Troubleshooting",
+        "level": 1,
+        "starts_at": 307
+      },
+      {
+        "text": "Diagnostics",
+        "level": 2,
+        "starts_at": 309
+      }
+    ]
+  }
+}
