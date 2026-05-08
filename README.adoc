@@ -88,7 +88,7 @@ The provided system also works for solo practitioners who want a stable, isolate
 
 [TIP]
 ====
-LLMs or people using LLMs to help them use DocOps Box should reference link:{this_proj_src_www_url}/blob/latest/docs/agent/user-guidance/skill-skim.json[the Agent User Guidance skill]
+LLMs or people engaging LLMs/agents to help them use DocOps Box should reference link:https://github.com/DocOps/box/blob/agent-docs/user-guidance/skill-skim.json[the Agent User Guidance skill].
 ====
 
 Even if you don't use the images or tools provided, this guide should still be helpful for anyone orienting to the world of docs-as-code tools and workflows.
@@ -2177,7 +2177,7 @@ It runs on your Node.js runtime, so you can install it with npm:
 
 The DocOps Box `work` images include a handful of quality-of-life tweaks beyond the default Zsh/OhMyZsh setup.
 
-If you are running natively, you can reproduce any of these you find useful.
+If you are running these tools on your host, you can reproduce any of these you find useful.
 
 Shell: command aliases::
 Add to your `~/.zshrc` (or `~/.bashrc`):
