@@ -41,20 +41,24 @@ task gen_agent_docs: :gen_dxbx_help do
 
   # Define skills to convert (source .adoc → output .md in docs/agent/)
   skills = [
-    { src: 'README.adoc', dest: 'docs/agent/readme.md', skim: true, skim_pattern: %r{^.*?/docs/agent/readme\.md$}, skim_key: 'docs/agent/readme.md' },
-    { src: 'docs/skills/agent-guide.adoc', dest: 'docs/agent/user-guidance/SKILL.md', skim: true, skim_pattern: %r{^.*?/docs/agent/user-guidance/SKILL\.md$}, skim_key: 'docs/agent/user-guidance/SKILL.md' },
-    { src: 'docs/skills/host-prerequisites-macos.adoc', dest: 'docs/agent/host-prerequisites-macos/SKILL.md', skim: false },
-    { src: 'docs/skills/host-prerequisites-windows.adoc', dest: 'docs/agent/host-prerequisites-windows/SKILL.md', skim: false }
+    { src: 'README.adoc', dest: 'docs/agent/readme.md', skim: true, skim_pattern: %r{^.*?/docs/agent/readme\.md$},
+skim_key: 'docs/agent/readme.md' },
+    { src: 'docs/skills/agent-guide.adoc', dest: 'docs/agent/user-guidance/SKILL.md', skim: true,
+skim_pattern: %r{^.*?/docs/agent/user-guidance/SKILL\.md$}, skim_key: 'docs/agent/user-guidance/SKILL.md' },
+    { src: 'docs/skills/host-prerequisites-macos.adoc', dest: 'docs/agent/host-prerequisites-macos/SKILL.md',
+skim: false },
+    { src: 'docs/skills/host-prerequisites-windows.adoc', dest: 'docs/agent/host-prerequisites-windows/SKILL.md',
+skim: false }
   ]
 
   require 'json'
 
   skills.each do |skill|
     next unless File.exist?(skill[:src])
-    
+
     # Ensure output directory exists
     FileUtils.mkdir_p(File.dirname(skill[:dest]))
-    
+
     # Convert AsciiDoc to Markdown using MarkDownGrade
     Sourcerer::AsciiDoc.mark_down_grade(
       skill[:src],
@@ -64,27 +68,27 @@ task gen_agent_docs: :gen_dxbx_help do
       backend: 'asciidoctor-html5s',
       include_frontmatter: true,
       markdown_options: { github_flavored: true })
-    
+
     puts "Generated skill: #{skill[:dest]}"
-    
+
     # Generate skim only for marked skills
-    if skill[:skim]
-      skim_json_raw = `rake labdev:skim[#{skill[:dest]},flat,json]`
-      skim_data = JSON.parse(skim_json_raw)
-      
-      # Normalize paths: use custom pattern if provided, otherwise default
-      skim_pattern = skill[:skim_pattern] || %r{^.*?/docs/agent/user-guidance/}
-      skim_key = skill[:skim_key]
-      
-      fixed_skim = skim_data.transform_keys do |key|
-        key.sub(skim_pattern, skim_key)
-      end
-      
-      # For README, output as readme-skim.json; for skills, use skill-skim.json
-      skim_filename = skill[:dest].include?('readme') ? 'readme-skim.json' : 'skill-skim.json'
-      skim_file = File.join(File.dirname(skill[:dest]), skim_filename)
-      File.write(skim_file, JSON.pretty_generate(fixed_skim))
-      puts "Generated skim: #{skim_file}"
+    next unless skill[:skim]
+
+    skim_json_raw = `rake labdev:skim[#{skill[:dest]},flat,json]`
+    skim_data = JSON.parse(skim_json_raw)
+
+    # Normalize paths: use custom pattern if provided, otherwise default
+    skim_pattern = skill[:skim_pattern] || %r{^.*?/docs/agent/user-guidance/}
+    skim_key = skill[:skim_key]
+
+    fixed_skim = skim_data.transform_keys do |key|
+      key.sub(skim_pattern, skim_key)
     end
+
+    # For README, output as readme-skim.json; for skills, use skill-skim.json
+    skim_filename = skill[:dest].include?('readme') ? 'readme-skim.json' : 'skill-skim.json'
+    skim_file = File.join(File.dirname(skill[:dest]), skim_filename)
+    File.write(skim_file, JSON.pretty_generate(fixed_skim))
+    puts "Generated skim: #{skim_file}"
   end
 end
