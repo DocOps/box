@@ -9,7 +9,7 @@ DocOps Box uses **Docker** and **VS Code Dev Containers** to provide a consisten
 
 The provided system also works for solo practitioners who want a stable, isolated environment for their docs projects without the hassle of managing dependencies on their host system.
 
-> **TIP:** LLMs or people using LLMs to help them use DocOps Box should reference [the Agent User Guidance skill](https://github.com/DocOps/box/blob/latest/docs/agent/user-guidance/skill-skim.json)
+> **TIP:** LLMs or people engaging LLMs/agents to help them use DocOps Box should reference [the Agent User Guidance skill](https://github.com/DocOps/box/blob/agent-docs/user-guidance/skill-skim.json).
 
 Even if you don’t use the images or tools provided, this guide should still be helpful for anyone orienting to the world of docs-as-code tools and workflows. It includes a section for [“host installation”](#ruby-for-real) of all the tools supported by the container approach, so you can choose your own adventure if you prefer to set up your workstation without Docker.
 
@@ -2148,7 +2148,7 @@ npm install -g @redocly/cli
 
 The DocOps Box `work` images include a handful of quality-of-life tweaks beyond the default Zsh/OhMyZsh setup.
 
-If you are running natively, you can reproduce any of these you find useful.
+If you are running these tools on your host, you can reproduce any of these you find useful.
 
 <dl>
 <dt>Shell: command aliases</dt>
