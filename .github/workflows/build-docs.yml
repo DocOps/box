@@ -47,7 +47,7 @@ jobs:
         run: |
           # Save generated docs to a temp location before branch switch
           mkdir -p /tmp/agent-docs-backup
-          cp -r docs/agent/* /tmp/agent-docs-backup/
+          cp -r docs/skills/* /tmp/agent-docs-backup/
           echo "✅ Agent docs backed up"
 
       - name: Setup agent-docs branch
