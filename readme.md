@@ -9,7 +9,7 @@ DocOps Box uses **Docker** and **VS Code Dev Containers** to provide a consisten
 
 The provided system also works for solo practitioners who want a stable, isolated environment for their docs projects without the hassle of managing dependencies on their host system.
 
-> **TIP:** LLMs or people engaging LLMs/agents to help them use DocOps Box should reference [the Agent User Guidance skill](https://github.com/DocOps/box/blob/agent-docs/user-guidance/skill-skim.json).
+> **TIP:** LLMs or people engaging LLMs/agents to help them use DocOps Box should reference [this JSON outline of the core agent guidance skill](https://raw.githubusercontent.com/DocOps/box/refs/heads/agent-docs/user-guidance/skill-skim.json). There is also a [[Markdown version of this README](https://raw.githubusercontent.com/DocOps/box/refs/heads/agent-docs/readme.md) (with a [JSON skim outline](https://raw.githubusercontent.com/DocOps/box/refs/heads/agent-docs/readme-skim.json) for token savings).
 
 Even if you don’t use the images or tools provided, this guide should still be helpful for anyone orienting to the world of docs-as-code tools and workflows. It includes a section for [“host installation”](#ruby-for-real) of all the tools supported by the container approach, so you can choose your own adventure if you prefer to set up your workstation without Docker.
 
@@ -61,7 +61,7 @@ Table of Contents
 <a id="intro"></a>
 ## Introduction
 
-This project is geared as a guide and assets for meeting **_non_-developer tech or clerical workers** , typically on their **Windows** or maybe **MacOS** systems, not yet set up as “development environments” with tools like <strong class="buzz">Ruby</strong>, <strong class="buzz">Node.js</strong>, <strong class="buzz">Python</strong>, <strong class="buzz">Git</strong>, <strong class="buzz">Pandoc</strong>, <strong class="buzz">Vale</strong> and the world of capabilities that these tools open up.
+This project provides a guide and assets for meeting **_non_-developer tech or clerical workers** , typically on their **Windows** or maybe **MacOS** systems, not yet set up as “development environments” with tools like <strong class="buzz">Ruby</strong>, <strong class="buzz">Node.js</strong>, <strong class="buzz">Python</strong>, <strong class="buzz">Git</strong>, <strong class="buzz">Pandoc</strong>, <strong class="buzz">Vale</strong> and the world of capabilities that these tools open up.
 
 > **NOTE:** This entire project is geared toward **Windows, Mac, _and_ Linux** users, but it assumes virtually zero Linux/Unix knowledge or preference. You will be using a command line (terminal), and it needs to be (1) Mac-based or (2) Linux-based (including via WSL2 on Windows).
 
@@ -82,7 +82,7 @@ The next few sections are for users who want to understand the rationale and con
 <a id="tooling-overview"></a>
 ### Tooling Overview
 
-The only real prerequisite for the “Dockerized” (“containerized”) approach to establishing a robust DocOps environment, as provided in this project, is that you have Docker working on top of a Unix-like shell[<sup>🔖</sup>](#gloss-shell).
+The only real requirement for a “Dockerized” (“containerized”) approach to establishing a robust DocOps environment, as provided in this project, is that you have Docker working on top of a Unix-like shell[<sup>🔖</sup>](#gloss-shell).
 
 It makes the most sense for users who need a consistent mix of tools across multiple projects; setting up a separate Docker image per tool is at least as complicated as a native install.
 
@@ -271,6 +271,7 @@ Work through the following steps in order.
 
 This section is somewhat long but should move along quickly. All of these apps are critical, some are likely already available on your system, and this guide covers installing them on any major platform.
 
+> **WARNING:** DocOps Box images require free space on your local disk. The `max:work` images are around 2.3 GB, and the `min:live` images are around 700 MB.
 <a id="prereq-terminal"></a>
 ### Terminal App (All OSes; Advised)
 
@@ -280,22 +281,24 @@ There is no avoiding the command line in the docs-as-code world. If you already 
 
 If you are unaware of or unhappy with your terminal app, here are my recommendations per operating system.
 
-<a id="warp-terminal"></a>
+<a id="warp-wave-terminal"></a>
 #### Warp and Wave
 
-By far my two favorite terminal apps are Warp and Wave.
+By far my two favorite terminal apps are Warp and Wave. Both are free, open-source programs with optional AI integration, at a cost.
 
-Both are freemium open-source models with generous free tiers.
+> **WARNING:** Both Wave and Warp install with telemetry be enabled by default, and it is required for free AI use. Paid users can opt out of telemetry, as can free users not wishing to partake of the AI features.
 
-Warp has a fully integrated terminal that can be a little bit overwhelming.
+Warp has a fully AI-integrated terminal that can be a little bit overwhelming but provides excellent interactivity between terminal and GUI[<sup>🔖</sup>](#gloss-gui).
 
-Wave is a chat-only tool for now, so you have to copy and paste commands and output back and forth, though the chat can automatically read local files.
+Wave’s AI aspect is chat-only for now, so you have to copy and paste commands and output back and forth, though the chat can automatically read local files.
+
+Both are excellent terminal emulators _aside from or despite_ the optional AI tie-in.
 
 - [Download Warp](https://www.warp.dev/terminal) (downloads for all platforms in page footer)
 - [Download Wave](https://www.waveterm.dev/download)
 
-<a id="host-installs"></a>
-#### Host Terminal Apps
+<a id="os-terminals"></a>
+#### OS-specific terminal apps
 
 If you prefer to install from an app store or package manager, here are some good options on all three platforms.
 
@@ -543,7 +546,7 @@ dxbx ex docops info
 
 You should see a nicely formatted readout of available tools and be returned to your host shell prompt.
 
-#What was that?]
+#What was that?
 
 The second half of the above command (`docops info`) is run inside any DocOps Box container for a readout of tool availability and versions.
 
@@ -1528,6 +1531,13 @@ Short for _command-line interface_. Refers to any prompt-based program you inter
 </dl>
 
 <dl>
+<dt>GUI</dt>
+<dd>
+Short for _graphical user interface_, a program that presents interactive visual elements like windows, buttons, and menus. Most terminal apps are “GUIs”; CLIs run inside the terminal interface, but the app offers menus, tabs, or other external visual elements.
+</dd>
+</dl>
+
+<dl>
 <dt>TUI</dt>
 <dd>
 For _text-based user interface_. An application that runs inside a terminal but presents a structured, screen-filling layout; more than a plain command prompt, less than a graphical window. The text editors included in DocOps Box images, nano and Vim, are TUI applications.
@@ -2311,29 +2321,61 @@ Raw `docker run` commands quickly grow unwieldy: volumes, ports, user IDs, envir
 
 Fortunately, the breadth of DocOps use cases does not require a complex multi-service setup, so the Compose file is simple and approachable for users new to Docker.
 </dd>
+</dl>
+
+<dl>
+<dt>Why no Podman support?</dt>
+<dd>
+Podman is a promising alternative to Docker that I simply don’t have real experience with. So far my clients and colleagues have already had access to and often professional support for Docker. Adding Podman support seems like a worthy goal, but I have not investigated the complexity or the maintenance overhead it will add. See about [tool requests below](#tool-request) if you would like to see this added.
+</dd>
+</dl>
+
+<dl>
 <dt>Why separate `work` and `live` contexts?</dt>
 <dd>
 Interactive daily work benefits from things that automated pipelines do not, such as Z shell, TUI text editors, and full terminal tooling. Including these in a `live` CI/CD image wastes build time and inflates image size. Separate contexts keep each image lean and purpose-built.
 
 That said, you could also use one `max:work` image for both purposes early on if you don’t wish to fuss about the distinction.
 </dd>
+</dl>
+
+<dl>
 <dt>Why named volumes for all dependency caches?</dt>
 <dd>
 Dependency trees for Ruby, Node.js, and Python all produce Linux-native artifacts (compiled gem extensions, Node binary modules, Python virtualenv symlinks) that are wrong-architecture or broken when accessed from the host filesystem on MacOS or Windows. Keeping them in named volumes (invisible to the host) removes that failure mode entirely and eliminates bind-mount overhead on MacOS. Keeping dependency files invisible to the host filesystem also keeps searches cleaner than if they were stashed in a directory under the project root.
 
 Dependency caches are _disposable and fully reproducible_ `bundle install`, `npm install`, or `pip install` regenerates them in minutes.
 </dd>
+</dl>
+
+<dl>
 <dt>Why an entrypoint script?</dt>
 <dd>
 Docker images deployed to a registry cannot know the UID or GID of the user who will run them. Placing UID/GID reconciliation in the image’s own `ENTRYPOINT` script (rather than baking it at build time or requiring a separate file in the user’s project) satisfies all three requirements simultaneously: it runs on every `docker run` or `docker compose run` invocation, works with pre-built registry images, requires no extra files in the user’s project directory.
 
 The entrypoint detects the `HOST_UID` and `HOST_GID` environment variables (passed in by `docopsbox.yml`), adjusts the container user’s identity to match, then drops privileges and executes the original command (`$CMD` or the default shell). On MacOS with Docker Desktop, the VM layer provides transparent ownership mapping and the entrypoint is a no-op (it does nothing and throws no error).
 </dd>
+</dl>
+
+<dl>
 <dt>Why no [your runtime here]?</dt>
 <dd>
 The `max` images include Ruby, Node.js, and Python because they are the environments I repeatedly find myself using and recommending to clients. Tempted as I am to add Java, Go, and Rust, I have no real experience supporting these platforms and only sporadic need. Go, Haskell, and Rust applications typically compile to static binaries that run just fine on the host, such as Vale and Pandoc. Adding more runtimes would also bloat the image size and build time, and I want to keep the project focused on documentation operations rather than becoming a general-purpose development environment.
+
+_If you have a strong case for a runtime or tool_ not currently included that would likely be widely appreciated, [file a tool-request issue](https://github.com/DocOps/box/issues/new?labels=tool%20request). I will consider adding it if it fits the project’s scope and my experience, or at least I will document my reasons for declining and help you build a custom image with your tool included.
 </dd>
 </dl>
+
+<!-- vale DocOpsLab-Authoring.Spelling = NO -->
+
+<dl>
+<dt>Should we vibe code it?</dt>
+<dd>
+Absolutely not. See [my blog post](https://docopslab.org/blog/vibe-coding-vs-programming/) as well as [“Most vibe-coded tools are not for you”](https://passo.uno/tools-slop-is-a-problem/) from fellow traveler Fabrizio Ferri Benedetti for approved takes on the quality bar for shippable software. LLM/agent assistance is welcome, but everything gets fully reviewed and manually pressure tested.
+</dd>
+</dl>
+
+<!-- vale DocOpsLab-Authoring.Spelling = YES -->
 
 <a id="development"></a>
 ### Appendix F: Development and Contribution

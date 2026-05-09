@@ -17,16 +17,18 @@ There is no avoiding the command line in the docs-as-code world. If you already 
 
 If you are unaware of or unhappy with your terminal app, here are my recommendations per operating system.
 
-<a id="warp-terminal"></a>
+<a id="warp-wave-terminal"></a>
 ### Warp and Wave
 
-By far my two favorite terminal apps are Warp and Wave.
+By far my two favorite terminal apps are Warp and Wave. Both are free, open-source programs with optional AI integration, at a cost.
 
-Both are freemium open-source models with generous free tiers.
+> **WARNING:** Both Wave and Warp install with telemetry be enabled by default, and it is required for free AI use. Paid users can opt out of telemetry, as can free users not wishing to partake of the AI features.
 
-Warp has a fully integrated terminal that can be a little bit overwhelming.
+Warp has a fully AI-integrated terminal that can be a little bit overwhelming but provides excellent interactivity between terminal and GUI[<sup>🔖</sup>](#gloss-gui).
 
-Wave is a chat-only tool for now, so you have to copy and paste commands and output back and forth, though the chat can automatically read local files.
+Wave’s AI aspect is chat-only for now, so you have to copy and paste commands and output back and forth, though the chat can automatically read local files.
+
+Both are excellent terminal emulators _aside from or despite_ the optional AI tie-in.
 
 - [Download Warp](https://www.warp.dev/terminal) (downloads for all platforms in page footer)
 - [Download Wave](https://www.waveterm.dev/download)

@@ -31,442 +31,442 @@
       {
         "text": "Terminal App (All OSes; Advised)",
         "level": 2,
-        "starts_at": 275
+        "starts_at": 276
       },
       {
         "text": "Warp and Wave",
         "level": 3,
-        "starts_at": 284
+        "starts_at": 285
       },
       {
-        "text": "Host Terminal Apps",
+        "text": "OS-specific terminal apps",
         "level": 3,
-        "starts_at": 298
+        "starts_at": 301
       },
       {
         "text": "VS Code (All OSes; Advised)",
         "level": 2,
-        "starts_at": 309
+        "starts_at": 312
       },
       {
         "text": "Bash 4+ (MacOS Only)",
         "level": 2,
-        "starts_at": 356
+        "starts_at": 359
       },
       {
         "text": "WSL2 (Windows Only)",
         "level": 2,
-        "starts_at": 369
+        "starts_at": 372
       },
       {
         "text": "Curl (All Hosts; Required)",
         "level": 2,
-        "starts_at": 389
+        "starts_at": 392
       },
       {
         "text": "Docker (All OSes)",
         "level": 2,
-        "starts_at": 409
+        "starts_at": 412
       },
       {
         "text": "Docker on Windows (WSL2)",
         "level": 3,
-        "starts_at": 416
+        "starts_at": 419
       },
       {
         "text": "Docker on MacOS",
         "level": 3,
-        "starts_at": 423
+        "starts_at": 426
       },
       {
         "text": "Docker on Linux (non-WSL)",
         "level": 3,
-        "starts_at": 430
+        "starts_at": 433
       },
       {
         "text": "DocOps in a Box: Quick-start Guide",
         "level": 1,
-        "starts_at": 460
+        "starts_at": 463
       },
       {
         "text": "Quickest Start",
         "level": 2,
-        "starts_at": 465
+        "starts_at": 468
       },
       {
         "text": "Step 1: Install dxbx (once, system-wide)",
         "level": 2,
-        "starts_at": 484
+        "starts_at": 487
       },
       {
         "text": "Step 2: Initialize your project (optional)",
         "level": 2,
-        "starts_at": 512
+        "starts_at": 515
       },
       {
         "text": "Step 3: Test dxbx with default image",
         "level": 2,
-        "starts_at": 536
+        "starts_at": 539
       },
       {
         "text": "Step 4: Start working",
         "level": 2,
-        "starts_at": 553
+        "starts_at": 556
       },
       {
         "text": "Using Your New Environment",
         "level": 1,
-        "starts_at": 568
+        "starts_at": 571
       },
       {
         "text": "Understanding Your Shells",
         "level": 2,
-        "starts_at": 575
+        "starts_at": 578
       },
       {
         "text": "Volume Lifecycle",
         "level": 2,
-        "starts_at": 714
+        "starts_at": 717
       },
       {
         "text": "Volume Management Commands",
         "level": 3,
-        "starts_at": 742
+        "starts_at": 745
       },
       {
         "text": "Per-invocation Image Overrides",
         "level": 2,
-        "starts_at": 780
+        "starts_at": 783
       },
       {
         "text": "Example commands",
         "level": 3,
-        "starts_at": 825
+        "starts_at": 828
       },
       {
         "text": "Adding Runtime Dependencies",
         "level": 2,
-        "starts_at": 862
+        "starts_at": 865
       },
       {
         "text": "Open a server port",
         "level": 2,
-        "starts_at": 917
+        "starts_at": 920
       },
       {
         "text": "Configuration Reference",
         "level": 1,
-        "starts_at": 945
+        "starts_at": 948
       },
       {
         "text": "Environment Variables (.config/.env)",
         "level": 2,
-        "starts_at": 961
+        "starts_at": 964
       },
       {
         "text": "Secret Environment Variables (.config/.env.local)",
         "level": 2,
-        "starts_at": 1015
+        "starts_at": 1018
       },
       {
         "text": "Project Slug Resolution Order",
         "level": 2,
-        "starts_at": 1048
+        "starts_at": 1051
       },
       {
         "text": "Image Variants and Contexts",
         "level": 2,
-        "starts_at": 1057
+        "starts_at": 1060
       },
       {
         "text": "Docker Compose Configuration (docopsbox.yml)",
         "level": 2,
-        "starts_at": 1105
+        "starts_at": 1108
       },
       {
         "text": "Key configuration",
         "level": 3,
-        "starts_at": 1110
+        "starts_at": 1113
       },
       {
         "text": "VS Code Dev Container Configuration (.devcontainer/devcontainer.json)",
         "level": 2,
-        "starts_at": 1118
+        "starts_at": 1121
       },
       {
         "text": "Troubleshooting",
         "level": 1,
-        "starts_at": 1125
+        "starts_at": 1128
       },
       {
         "text": "Start with Diagnostics",
         "level": 2,
-        "starts_at": 1127
+        "starts_at": 1130
       },
       {
         "text": "Common Issues",
         "level": 2,
-        "starts_at": 1145
+        "starts_at": 1148
       },
       {
         "text": "Extending DocOps Box",
         "level": 1,
-        "starts_at": 1209
+        "starts_at": 1212
       },
       {
         "text": "Custom Image Builds",
         "level": 2,
-        "starts_at": 1218
+        "starts_at": 1221
       },
       {
         "text": "Use docker build arguments",
         "level": 3,
-        "starts_at": 1226
+        "starts_at": 1229
       },
       {
         "text": "Quickie builds with dxbx commands",
         "level": 3,
-        "starts_at": 1239
+        "starts_at": 1242
       },
       {
         "text": "Use a custom image with dxbx and Dev Containers",
         "level": 3,
-        "starts_at": 1265
+        "starts_at": 1268
       },
       {
         "text": "Appendices",
         "level": 1,
-        "starts_at": 1283
+        "starts_at": 1286
       },
       {
         "text": "Appendix A: Who is This Software For?",
         "level": 2,
-        "starts_at": 1285
+        "starts_at": 1288
       },
       {
         "text": "Appendix B: Glossary",
         "level": 2,
-        "starts_at": 1309
+        "starts_at": 1312
       },
       {
         "text": "Domain jargon and idioms",
         "level": 3,
-        "starts_at": 1314
+        "starts_at": 1317
       },
       {
         "text": "Docker and container concepts",
         "level": 3,
-        "starts_at": 1363
+        "starts_at": 1366
       },
       {
         "text": "System and shell concepts",
         "level": 3,
-        "starts_at": 1422
+        "starts_at": 1425
       },
       {
         "text": "Runtime and dependency management",
         "level": 3,
-        "starts_at": 1476
+        "starts_at": 1479
       },
       {
         "text": "Abbreviations and tooling terms",
         "level": 3,
-        "starts_at": 1514
+        "starts_at": 1517
       },
       {
         "text": "Appendix C: Auxiliary Tools",
         "level": 2,
-        "starts_at": 1552
+        "starts_at": 1562
       },
       {
         "text": "Sample Commands: Asciidoctor",
         "level": 3,
-        "starts_at": 1639
+        "starts_at": 1649
       },
       {
         "text": "Sample Commands: Kramdown-AsciiDoc",
         "level": 3,
-        "starts_at": 1658
+        "starts_at": 1668
       },
       {
         "text": "Sample Commands: Nokogiri",
         "level": 3,
-        "starts_at": 1665
+        "starts_at": 1675
       },
       {
         "text": "Sample Commands: Tilt",
         "level": 3,
-        "starts_at": 1682
+        "starts_at": 1692
       },
       {
         "text": "Sample Commands: Redocly CLI",
         "level": 3,
-        "starts_at": 1698
+        "starts_at": 1708
       },
       {
         "text": "LibreOffice tools",
         "level": 3,
-        "starts_at": 1713
+        "starts_at": 1723
       },
       {
         "text": "Key capabilities comparison",
         "level": 4,
-        "starts_at": 1719
+        "starts_at": 1729
       },
       {
         "text": "Use soffice for:",
         "level": 4,
-        "starts_at": 1834
+        "starts_at": 1844
       },
       {
         "text": "Use unoserver when you need:",
         "level": 4,
-        "starts_at": 1843
+        "starts_at": 1853
       },
       {
         "text": "Sample LibreOffice commands",
         "level": 4,
-        "starts_at": 1853
+        "starts_at": 1863
       },
       {
         "text": "Appendix D: Installing Everything to Host",
         "level": 2,
-        "starts_at": 1899
+        "starts_at": 1909
       },
       {
         "text": "Why Not?",
         "level": 3,
-        "starts_at": 1922
+        "starts_at": 1932
       },
       {
         "text": "Auxiliary tools and host-side installs",
         "level": 3,
-        "starts_at": 1947
+        "starts_at": 1957
       },
       {
         "text": "Use Everything Natively",
         "level": 3,
-        "starts_at": 1981
+        "starts_at": 1991
       },
       {
         "text": "Windows Users",
         "level": 4,
-        "starts_at": 1988
+        "starts_at": 1998
       },
       {
         "text": "[SIDEBAR] Truly Native Windows Dev Environment",
         "level": 4,
-        "starts_at": 1994
+        "starts_at": 2004
       },
       {
         "text": "MacOS Users",
         "level": 4,
-        "starts_at": 2011
+        "starts_at": 2021
       },
       {
         "text": "Linux Users (Including WSL)",
         "level": 4,
-        "starts_at": 2032
+        "starts_at": 2042
       },
       {
         "text": "Use a Ruby management system",
         "level": 3,
-        "starts_at": 2047
+        "starts_at": 2057
       },
       {
         "text": "[SIDEBAR] So, Which Ruby Version?",
         "level": 4,
-        "starts_at": 2057
+        "starts_at": 2067
       },
       {
         "text": "Add Ruby gems globally",
         "level": 3,
-        "starts_at": 2078
+        "starts_at": 2088
       },
       {
         "text": "Node.js",
         "level": 3,
-        "starts_at": 2091
+        "starts_at": 2101
       },
       {
         "text": "Python",
         "level": 3,
-        "starts_at": 2104
+        "starts_at": 2114
       },
       {
         "text": "Pandoc",
         "level": 3,
-        "starts_at": 2113
+        "starts_at": 2123
       },
       {
         "text": "Vale",
         "level": 3,
-        "starts_at": 2122
+        "starts_at": 2132
       },
       {
         "text": "LibreOffice CLI",
         "level": 3,
-        "starts_at": 2129
+        "starts_at": 2139
       },
       {
         "text": "Redocly CLI",
         "level": 3,
-        "starts_at": 2138
+        "starts_at": 2148
       },
       {
         "text": "Other environment customizations",
         "level": 3,
-        "starts_at": 2147
+        "starts_at": 2157
       },
       {
         "text": "Appendix E: Background and Context",
         "level": 2,
-        "starts_at": 2223
+        "starts_at": 2233
       },
       {
         "text": "Threading the needle with Docker",
         "level": 3,
-        "starts_at": 2230
+        "starts_at": 2240
       },
       {
         "text": "Why not the alternatives?",
         "level": 3,
-        "starts_at": 2249
+        "starts_at": 2259
       },
       {
         "text": "Why Ruby?",
         "level": 3,
-        "starts_at": 2279
+        "starts_at": 2289
       },
       {
         "text": "Why Zsh?",
         "level": 3,
-        "starts_at": 2292
+        "starts_at": 2302
       },
       {
         "text": "Architecture Decision Rationale",
         "level": 3,
-        "starts_at": 2305
+        "starts_at": 2315
       },
       {
         "text": "Appendix F: Development and Contribution",
         "level": 2,
-        "starts_at": 2339
+        "starts_at": 2381
       },
       {
         "text": "Building Locally",
         "level": 3,
-        "starts_at": 2344
+        "starts_at": 2386
       },
       {
         "text": "Smoke Tests",
         "level": 3,
-        "starts_at": 2351
+        "starts_at": 2393
       },
       {
         "text": "Contributing",
         "level": 3,
-        "starts_at": 2365
+        "starts_at": 2407
       }
     ]
   }

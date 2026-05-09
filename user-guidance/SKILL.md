@@ -17,7 +17,7 @@ This project includes an introductory guide and quick-start procedure for establ
 
 DocOps Box uses **Docker** and **VS Code Dev Containers** to provide a consistent, reproducible environment for digital document management across different operating systems and team members.
 
-The provided system also works for solo practitioners who want a stable, isolated environment for their docs projects without the hassle of managing dependencies on their host system. This project is geared as a guide and assets for meeting **_non_-developer tech or clerical workers** , typically on their **Windows** or maybe **MacOS** systems, not yet set up as “development environments” with tools like <strong class="buzz">Ruby</strong>, <strong class="buzz">Node.js</strong>, <strong class="buzz">Python</strong>, <strong class="buzz">Git</strong>, <strong class="buzz">Pandoc</strong>, <strong class="buzz">Vale</strong> and the world of capabilities that these tools open up.
+The provided system also works for solo practitioners who want a stable, isolated environment for their docs projects without the hassle of managing dependencies on their host system. This project provides a guide and assets for meeting **_non_-developer tech or clerical workers** , typically on their **Windows** or maybe **MacOS** systems, not yet set up as “development environments” with tools like <strong class="buzz">Ruby</strong>, <strong class="buzz">Node.js</strong>, <strong class="buzz">Python</strong>, <strong class="buzz">Git</strong>, <strong class="buzz">Pandoc</strong>, <strong class="buzz">Vale</strong> and the world of capabilities that these tools open up.
 
 <a id="_prerequisites"></a>
 ## Prerequisites
