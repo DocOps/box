@@ -9,7 +9,7 @@ DocOps Box uses **Docker** and **VS Code Dev Containers** to provide a consisten
 
 The provided system also works for solo practitioners who want a stable, isolated environment for their docs projects without the hassle of managing dependencies on their host system.
 
-> **TIP:** LLMs or people engaging LLMs/agents to help them use DocOps Box should reference [this JSON outline of the core agent guidance skill](https://raw.githubusercontent.com/DocOps/box/refs/heads/agent-docs/user-guidance/skill-skim.json). There is also a [[Markdown version of this README](https://raw.githubusercontent.com/DocOps/box/refs/heads/agent-docs/readme.md) (with a [JSON skim outline](https://raw.githubusercontent.com/DocOps/box/refs/heads/agent-docs/readme-skim.json) for token savings).
+> **TIP:** LLMs or people engaging LLMs/agents to help them use DocOps Box should reference [this JSON outline of the core agent guidance skill](https://raw.githubusercontent.com/DocOps/box/refs/heads/agent-docs/user-guidance/skill-skim.json). There is also a [Markdown version of this README](https://raw.githubusercontent.com/DocOps/box/refs/heads/agent-docs/readme.md) (with a [JSON skim outline](https://raw.githubusercontent.com/DocOps/box/refs/heads/agent-docs/readme-skim.json) for token savings).
 
 Even if you don’t use the images or tools provided, this guide should still be helpful for anyone orienting to the world of docs-as-code tools and workflows. It includes a section for [“host installation”](#ruby-for-real) of all the tools supported by the container approach, so you can choose your own adventure if you prefer to set up your workstation without Docker.
 
