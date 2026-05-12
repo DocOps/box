@@ -462,7 +462,7 @@ Both commands should print a version number with no errors before you continue.
 <a id="quickstart"></a>
 ## DocOps in a Box: Quick-start Guide
 
-If you have all the prerequisites in place, the recommended quick-start procedure is to use `dxbx` and a DocOps Box work image to get a containerized environment up and running in just a few minutes.
+_If you have all the [**prerequisites**](#prerequisites) in place_, the recommended quick-start procedure is to use `dxbx` and a DocOps Box work image to get a containerized environment up and running in just a few minutes.
 
 <a id="quickest-start"></a>
 ### Quickest Start
@@ -581,13 +581,13 @@ The first thing that confuses new users is that you now have _two_ command envir
 
 Your computer operating system or shell is the **host** system.
 
-You are virtualizing a purpose-built Linux operating system in a **container** , which exploits your host’s Linux/Unix kernel.
+You are virtualizing a purpose-built Linux operating system in a **container** , which exploits your host’s Linux/Unix kernel but is carefully isolated from the rest of your system. Only directories that are mounted into the container are shared between host and container; everything else is separate and protected.
 
 > **NOTE:** If you are using all of this inside WSL2 on Windows, ignore the fact that your Windows OS is also a host. For our purposes, the Linux shell you are running is your _host_, and Windows is your _OS_.
 
 So while you may sometimes have two (or more) command prompts to consider, we will specify the _host_ (where you run `dxbx` commands) or the _container_ (where you run DocOps tools).
 
-Instructions for any third-party Ruby or other CLI utilities (including other DocOps Lab apps) should be performed from within a DocOps Box container.
+Instructions for any third-party Ruby or other CLI utilities (including other DocOps Lab apps) should be performed within a DocOps Box container.
 
 **Mac and Linux users** have two layers:
 
@@ -603,7 +603,7 @@ Windows Terminal → WSL2 Linux shell → container shell (Zsh)
   (PowerShell) (host)
 ```
 
-The important thing for Windows users: `dxbx` commands are typed in the **WSL2 shell** , not in PowerShell or a Windows Command Prompt. WSL2 _is_ your host for everything that follows.
+The important thing for **Windows users** : `dxbx` commands are typed in the **WSL2 shell** , not in PowerShell or a Windows Command Prompt. WSL2 _is_ your host for everything that follows.
 
 Table 1. How you get into the container
 
@@ -622,14 +622,14 @@ Table 1. How you get into the container
 <tr>
 <td class="halign-left valign-top"><strong>VS Code + Dev Containers</strong></td>
 <td class="halign-left valign-top">Enter <code>dxbx vsc</code> in your <strong>host</strong> shell.
-Or run VS Code through our OS, open a project, <kbd class="keyseq"><kbd class="key">Ctrl</kbd>+<kbd class="key">Shift</kbd>+<kbd class="key">P</kbd></kbd> then select <em>Dev Containers: Reopen in Container</em> if necessary</td>
+Or run VS Code through your OS, open a project, <kbd class="keyseq"><kbd class="key">Ctrl</kbd>+<kbd class="key">Shift</kbd>+<kbd class="key">P</kbd></kbd> then select <em>Dev Containers: Reopen in Container</em> if necessary</td>
 <td class="halign-left valign-top">Terminal in the Dev Container window runs inside the container.</td>
 </tr>
 <tr>
 <td class="halign-left valign-top"><strong>Interactive shell</strong></td>
 <td class="halign-left valign-top">Enter <code>dxbx up</code> in your host shell</td>
 <td class="halign-left valign-top">Your prompt changes to the container shell.
-You stay there until you type <code>exit</code>.</td>
+You stay there until you enter <code>exit</code>.</td>
 </tr>
 <tr>
 <td class="halign-left valign-top"><strong>Get in and out</strong></td>
@@ -864,7 +864,9 @@ The settings for `PROJECT_SLUG` and `IMAGE_REGISTRY` can only be overridden via 
 <a id="adding-dependencies"></a>
 ### Adding Runtime Dependencies
 
-Inside the container, _do not_ install tools with one-off `gem install`, `npm install -g`, or `pip install` commands (even though it will work). This also goes for shell programs; _avoid_ using `apt-get install` or similar dependency manager[<sup>🔖</sup>](#gloss-dependency-manager) commands to add tools to the image.
+Inside the container, _do not_ install tools with one-off `gem install`, `npm install -g`, or `pip install` commands (even though it will work).
+
+> **NOTE:** This also goes for shell programs._Avoid_ using `apt-get install` or similar dependency manager commands to add tools to the image. See [Extending DocOps Box](#extending) for how to add tools to a custom image if you need them available in the container without installing them every time.
 
 Instead, declare any runtime libraries in a manifest file[<sup>🔖</sup>](#gloss-manifest) and let the package manager install the whole set. This best practice keeps your environment reproducible: anyone on your team (or a CI/CD operation) gets identical versions from the same manifest.
 
@@ -912,14 +914,14 @@ These install commands run automatically at container creation inside VS Code. Y
 
 If your package files are committed in Git and you don’t want to force your whole team to install a tool you need temporarily, you can add it to the image with a custom image build or Dockerfile. See [Extending DocOps Box](#extending).
 
-For the most part, the whole Docker-based approach of DocOps Box is intended to stick to a per-codebase strategy. While it is nice to have configuration-free tools like Pandoc and Asciidoctor available anywhere in your host shell, even Docker and `dxbx` cannot abstract away the complexity of persistence throughout a host system.
+For the most part, the whole Docker-based approach of DocOps Box is intended to stick to a per-codebase strategy. While it is nice to have tools like Pandoc and Asciidoctor available anywhere in your host shell, it is best to designate application-specific runtime tools in the application’s manifest files.
 
-If you do need more tools directly installed in a Docker image, consider [Extending DocOps Box](#extending).
+If you do need more tools directly installed in a Docker image, consider [a custom image build](#extending).
 
 <a id="open-server-port"></a>
 ### Open a server port
 
-If your project includes a server component (like Jekyll’s `bundle exec jekyll serve`), you can expose the port to your host machine using properties in the configuration files.
+If your project includes a server component (like Jekyll’s `bundle exec jekyll serve` or Docusaurus’s `npm run serve`), you can expose the port to your host machine using properties in the _Docker_ configuration files (not your application’s `_config.yml`, `docusaurus.config.js`, etc).
 
 **Uncomment and modify in `.config/docopsbox.yml`**  
 ```yaml
@@ -938,8 +940,14 @@ For VS Code Dev Containers, the port also needs to be forwarded in the Dev Conta
 
 Be sure the serve command inside the container is configured to bind at `0.0.0.0`, and the port is specified to match the forwarded port.
 
+**Example Jekyll serve command with port and host binding**  
 ```
 bundle exec jekyll serve --host 0.0.0 --port 4005
+```
+
+**Example Docusaurus serve command with port and host binding**  
+```
+npm run serve -- --build --host 0.0.0.0 --port 4005
 ```
 
 Once the server is running, you can access it from your host machine at `http://localhost:4005` (or whatever port you forwarded).
@@ -1441,7 +1449,7 @@ A program that accepts text commands and passes them to the operating system to 
 <dl>
 <dt>PATH</dt>
 <dd>
-An environment variable that lists the directories your shell searches when you type a command name. If `dxbx` cannot be found after installation, your PATH does not yet include the installation directory: `${XDG_BIN_HOME}` (which defaults to `~/.local/bin` if `XDG_BIN_HOME` is not set).`dxbx install` will offer to add the required line to your shell profile automatically.
+An environment variable that lists the directories your shell searches when you enter a command name. If `dxbx` cannot be found after installation, your PATH does not yet include the installation directory: `${XDG_BIN_HOME}` (which defaults to `~/.local/bin` if `XDG_BIN_HOME` is not set).`dxbx install` will offer to add the required line to your shell profile automatically.
 </dd>
 </dl>
 
