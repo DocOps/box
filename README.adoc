@@ -572,7 +572,7 @@ Both commands should print a version number with no errors before you continue.
 [[quickstart]]
 == DocOps in a Box: Quick-start Guide
 
-If you have all the prerequisites in place, the recommended quick-start procedure is to use `dxbx` and a DocOps Box work image to get a containerized environment up and running in just a few minutes.
+_If you have all the <<prerequisites,*prerequisites*>> in place_, the recommended quick-start procedure is to use `dxbx` and a DocOps Box work image to get a containerized environment up and running in just a few minutes.
 
 [[quickest-start]]
 === Quickest Start
@@ -707,7 +707,8 @@ The first thing that confuses new users is that you now have _two_ command envir
 
 Your computer operating system or shell is the *host* system.
 
-You are virtualizing a purpose-built Linux operating system in a *container*, which exploits your host's Linux/Unix kernel.
+You are virtualizing a purpose-built Linux operating system in a *container*, which exploits your host's Linux/Unix kernel but is carefully isolated from the rest of your system.
+Only directories that are mounted into the container are shared between host and container; everything else is separate and protected.
 
 [NOTE]
 If you are using all of this inside WSL2 on Windows, ignore the fact that your Windows OS is also a host.
@@ -715,7 +716,7 @@ For our purposes, the Linux shell you are running is your _host_, and Windows is
 
 So while you may sometimes have two (or more) command prompts to consider, we will specify the _host_ (where you run `dxbx` commands) or the _container_ (where you run DocOps tools).
 
-Instructions for any third-party Ruby or other CLI utilities (including other DocOps Lab apps) should be performed from within a DocOps Box container.
+Instructions for any third-party Ruby or other CLI utilities (including other DocOps Lab apps) should be performed within a DocOps Box container.
 
 *Mac and Linux users* have two layers:
 ....
@@ -729,7 +730,7 @@ Windows Terminal  →  WSL2 Linux shell  →  container shell (Zsh)
   (PowerShell)             (host)
 ....
 
-The important thing for Windows users: `dxbx` commands are typed in the *WSL2 shell*, not in PowerShell or a Windows Command Prompt.
+The important thing for *Windows users*: `dxbx` commands are typed in the *WSL2 shell*, not in PowerShell or a Windows Command Prompt.
 WSL2 _is_ your host for everything that follows.
 
 .How you get into the container
@@ -739,13 +740,13 @@ WSL2 _is_ your host for everything that follows.
 
 | VS Code + Dev Containers
 | Enter `dxbx vsc` in your *host* shell.
-Or run VS Code through our OS, open a project, kbd:[Ctrl + Shift + P] then select _Dev Containers: Reopen in Container_ if necessary
+Or run VS Code through your OS, open a project, kbd:[Ctrl + Shift + P] then select _Dev Containers: Reopen in Container_ if necessary
 | Terminal in the Dev Container window runs inside the container.
 
 | Interactive shell
 | Enter `dxbx up` in your host shell
 | Your prompt changes to the container shell.
-You stay there until you type `exit`.
+You stay there until you enter `exit`.
 
 | Get in and out
 | Enter `dxbx ex` followed by any command in your host shell
@@ -948,7 +949,11 @@ The settings for `PROJECT_SLUG` and `IMAGE_REGISTRY` can only be overridden via 
 === Adding Runtime Dependencies
 
 Inside the container, _do not_ install tools with one-off `gem install`, `npm install -g`, or `pip install` commands (even though it will work).
-This also goes for shell programs; _avoid_ using `apt-get install` or similar [.term]#dependency manager#<<gloss-dependency-manager,{gref}>> commands to add tools to the image.
+
+[NOTE]
+This also goes for shell programs.
+_Avoid_ using `apt-get install` or similar dependency manager commands to add tools to the image.
+See <<extending>> for how to add tools to a custom image if you need them available in the container without installing them every time.
 
 Instead, declare any runtime libraries in a [.term]#manifest file#<<gloss-manifest,{gref}>> and let the package manager install the whole set.
 This best practice keeps your environment reproducible:
@@ -988,14 +993,14 @@ If your package files are committed in Git and you don't want to force your whol
 See <<extending>>.
 
 For the most part, the whole Docker-based approach of DocOps Box is intended to stick to a per-codebase strategy.
-While it is nice to have configuration-free tools like Pandoc and Asciidoctor available anywhere in your host shell, even Docker and `dxbx` cannot abstract away the complexity of persistence throughout a host system.
+While it is nice to have tools like Pandoc and Asciidoctor available anywhere in your host shell, it is best to designate application-specific runtime tools in the application's manifest files.
 
-If you do need more tools directly installed in a Docker image, consider <<extending>>.
+If you do need more tools directly installed in a Docker image, consider <<extending,a custom image build>>.
 
 [[open-server-port]]
 === Open a server port
 
-If your project includes a server component (like Jekyll's `bundle exec jekyll serve`), you can expose the port to your host machine using properties in the configuration files.
+If your project includes a server component (like Jekyll's `bundle exec jekyll serve` or Docusaurus's `npm run serve`), you can expose the port to your host machine using properties in the _Docker_ configuration files (not your application's `_config.yml`, `docusaurus.config.js`, etc).
 
 .Uncomment and modify in `{compose_config_path}`
 [source,yaml]
@@ -1016,8 +1021,13 @@ For VS Code Dev Containers, the port also needs to be forwarded in the Dev Conta
 
 Be sure the serve command inside the container is configured to bind at `0.0.0.0`, and the port is specified to match the forwarded port.
 
+.Example Jekyll serve command with port and host binding
 [.prompt.prompt-container]
  bundle exec jekyll serve --host 0.0.0 --port 4005
+
+.Example Docusaurus serve command with port and host binding
+[.prompt.prompt-container]
+ npm run serve -- --build --host 0.0.0.0 --port 4005
 
 Once the server is running, you can access it from your host machine at `http://localhost:4005` (or whatever port you forwarded).
 
@@ -1526,7 +1536,7 @@ DocOps Box `work` images use Zsh with OhMyZsh; `live` images use Bash.
 
 [[gloss-path]]
 PATH::
-An environment variable that lists the directories your shell searches when you type a command name.
+An environment variable that lists the directories your shell searches when you enter a command name.
 If `dxbx` cannot be found after installation, your PATH does not yet include the installation directory: `${XDG_BIN_HOME}` (which defaults to `~/.local/bin` if `XDG_BIN_HOME` is not set).
 `dxbx install` will offer to add the required line to your shell profile automatically.
 
