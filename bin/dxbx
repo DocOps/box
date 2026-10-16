@@ -739,6 +739,32 @@ _fetch() {
   fi
 }
 
+# True if version $1 > $2 (both "vN.N.N"). No sort -V -- BSD sort (macOS) lacks it.
+_version_gt() {
+  local a="${1#v}" b="${2#v}"
+  local -a av bv
+  IFS=. read -r -a av <<< "$a"
+  IFS=. read -r -a bv <<< "$b"
+  local i
+  for i in 0 1 2; do
+    (( "${av[i]:-0}" > "${bv[i]:-0}" )) && return 0
+    (( "${av[i]:-0}" < "${bv[i]:-0}" )) && return 1
+  done
+  return 1
+}
+
+# Highest "vN.N.N" tag on DocOps/box, via the GitHub tags API.
+_latest_box_tag() {
+  local json names tag best=""
+  json=$(_fetch "https://api.github.com/repos/DocOps/box/tags" 2>/dev/null) || return 1
+  names=$(printf '%s' "$json" | grep -o '"name": *"v[0-9]*\.[0-9]*\.[0-9]*"' | sed -E 's/.*"(v[^"]+)".*/\1/')
+  for tag in $names; do
+    [[ -z "$best" ]] && best="$tag"
+    _version_gt "$tag" "$best" && best="$tag"
+  done
+  [[ -n "$best" ]] && printf '%s' "$best"
+}
+
 # Detect whether a string looks like a variant/context image specifier.
 # Valid forms:
 #   min  max  work  live
@@ -1621,28 +1647,25 @@ cmd_update() {
     _parse_image_spec "$1"; shift
   fi
 
-  local upstream_raw="https://raw.githubusercontent.com/DocOps/box/latest"
   local install_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
   local install_path="$install_dir/dxbx"
 
   # Script update
   printf '\n%s\n' "$(_bold 'Checking for dxbx update...')"
 
-  # Fetch upstream script to a temp file
+  local latest_tag; latest_tag=$(_latest_box_tag)
+  if [[ -z "$latest_tag" ]]; then
+    _fail "Could not determine the latest released version from GitHub."
+    exit 1
+  fi
+  local upstream_ver="${latest_tag#v}"
+
   local tmpfile; tmpfile=$(mktemp)
   # shellcheck disable=SC2064
   trap "rm -f '$tmpfile'" EXIT
 
-  if ! _fetch "$upstream_raw/bin/dxbx" > "$tmpfile" 2>/dev/null; then
+  if ! _fetch "https://raw.githubusercontent.com/DocOps/box/$latest_tag/bin/dxbx" > "$tmpfile" 2>/dev/null; then
     _fail "Could not reach upstream. Check your internet connection."
-    exit 1
-  fi
-
-  # Extract version from upstream script
-  local upstream_ver
-  upstream_ver=$(grep -m1 '^DOCOPSBOX_VERSION=' "$tmpfile" | sed 's/DOCOPSBOX_VERSION=//;s/"//g')
-  if [[ -z "$upstream_ver" ]]; then
-    _fail "Could not determine upstream version. The download may be corrupt."
     exit 1
   fi
 
