@@ -355,7 +355,9 @@ _compose() {
   # all use the same project name (e.g. docops-boxdev) and share containers/networks.
   _ensure_history_volume
   _run_echo "docker compose --file $COMPOSE_FILE $*"
-  docker compose --file "$COMPOSE_FILE" "$@"
+  local progress_flag=()
+  [[ "${DXBX_QUIET:-false}" == true ]] && progress_flag=(--progress quiet)
+  docker compose "${progress_flag[@]}" --file "$COMPOSE_FILE" "$@"
 }
 
 # Print the resolved image reference so users can see exactly which image will run.
