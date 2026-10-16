@@ -325,6 +325,7 @@ _launch_interactive() {
     --env HOST_UID="$(id -u)"
     --env HOST_GID="$(id -g)"
     --env RUN_USER=appuser
+    --env DXBX_QUIET="${DXBX_QUIET:-false}"
   )
   [[ -n "${SSH_AUTH_SOCK:-}" ]] && [[ -S "${SSH_AUTH_SOCK}" ]] && \
     args+=(--volume "${SSH_AUTH_SOCK}:/ssh-agent" --env SSH_AUTH_SOCK=/ssh-agent)
@@ -344,6 +345,7 @@ _launch_exec() {
     --env HOST_UID="$(id -u)"
     --env HOST_GID="$(id -g)"
     --env RUN_USER=appuser
+    --env DXBX_QUIET="${DXBX_QUIET:-false}"
   )
   _run_echo "docker run ${args[*]} $image $*"
   docker run "${args[@]}" "$image" "$@"
@@ -2022,7 +2024,7 @@ cmd_agent_help() {
 # (well after a command like `ex` has already decided what to print), and
 # must run before _read_compose_ext so an explicit show_commands/
 # show_warnings key there can still override this blanket switch.
-DXBX_QUIET=false
+export DXBX_QUIET=false
 for _dxbx_quiet_file in "$ENV_FILE" "$ENV_LOCAL_FILE"; do
   [[ -f "$_dxbx_quiet_file" ]] || continue
   _dxbx_quiet_val=$(_env_key DXBX_QUIET "$_dxbx_quiet_file")

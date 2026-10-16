@@ -54,22 +54,24 @@ if [ -n "${VIRTUAL_ENV:-}" ] && [ ! -f "${VIRTUAL_ENV}/bin/python" ] && command 
 fi
 
 # print the name, tags, context, and key labels of the current image for ID purposes
-if [ -f /etc/os-release ]; then
-  . /etc/os-release
-  image_ref="${DOCOPS_IMAGE_REF:-${IMAGE_REGISTRY:-docopslab}/box-${IMAGE_VARIANT:-${VARIANT:-max}}:${IMAGE_CONTEXT:-${CONTEXT:-work}}} (version ${DOCOPSBOX_VERSION:-unknown}"
-  if [ -n "${DOCOPSBOX_IMAGE_ID:-}" ]; then
-    image_ref+="; id: ${DOCOPSBOX_IMAGE_ID}"
-  fi
-  if [ -n "${DOCOPSBOX_IMAGE_DIGEST:-}" ]; then
-    # Truncate to 12 chars after sha256: for readability
-    clean_digest="${DOCOPSBOX_IMAGE_DIGEST#*sha256:}"
-    image_ref+="; digest: ${clean_digest:0:12}"
+if [ "${DXBX_QUIET:-false}" != "true" ]; then
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    image_ref="${DOCOPS_IMAGE_REF:-${IMAGE_REGISTRY:-docopslab}/box-${IMAGE_VARIANT:-${VARIANT:-max}}:${IMAGE_CONTEXT:-${CONTEXT:-work}}} (version ${DOCOPSBOX_VERSION:-unknown}"
+    if [ -n "${DOCOPSBOX_IMAGE_ID:-}" ]; then
+      image_ref+="; id: ${DOCOPSBOX_IMAGE_ID}"
+    fi
+    if [ -n "${DOCOPSBOX_IMAGE_DIGEST:-}" ]; then
+      # Truncate to 12 chars after sha256: for readability
+      clean_digest="${DOCOPSBOX_IMAGE_DIGEST#*sha256:}"
+      image_ref+="; digest: ${clean_digest:0:12}"
+    else
+      image_ref+="; digest: none"
+    fi
+    echo "Starting DocOps Box container from: $image_ref)"
   else
-    image_ref+="; digest: none"
+    echo "Starting DocOps Box container: unknown image (missing /etc/os-release)"
   fi
-  echo "Starting DocOps Box container from: $image_ref)"
-else
-  echo "Starting DocOps Box container: unknown image (missing /etc/os-release)"
 fi
 
 exec gosu "$RUN_USER" "$@"

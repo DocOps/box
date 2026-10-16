@@ -24,6 +24,7 @@ services:
       IMAGE_CONTEXT: ${IMAGE_CONTEXT:-work}
       DOCOPSBOX_IMAGE_ID: ${DOCOPSBOX_IMAGE_ID:-}
       DOCOPSBOX_IMAGE_DIGEST: ${DOCOPSBOX_IMAGE_DIGEST:-}
+      DXBX_QUIET: ${DXBX_QUIET:-false}
     volumes:
       # ..:/workspace because this compose file lives in .config/; .. resolves
       # to the project root which is what we want to mount as the workspace.
