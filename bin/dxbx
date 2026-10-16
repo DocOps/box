@@ -39,7 +39,7 @@ fi
 ENV_FILE="${PWD}/.config/.env"
 ENV_LOCAL_FILE="${PWD}/.config/.env.local"
 HISTORY_VOLUME="docops-shell-history"
-DOCOPSBOX_VERSION="0.1.0"
+DOCOPSBOX_VERSION="0.2.0"
 
 # XDG Base Directory paths for caching downloaded files (agent docs, etc.)
 XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
