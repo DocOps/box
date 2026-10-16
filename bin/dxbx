@@ -357,6 +357,11 @@ _compose() {
   # all use the same project name (e.g. docops-boxdev) and share containers/networks.
   _ensure_history_volume
   _run_echo "docker compose --file $COMPOSE_FILE $*"
+  if [[ "${DXBX_DEBUG:-false}" == true ]]; then
+    docker version
+    docker compose version
+    docker compose --file "$COMPOSE_FILE" config
+  fi
   local progress_flag=()
   [[ "${DXBX_QUIET:-false}" == true ]] && progress_flag=(--progress quiet)
   docker compose "${progress_flag[@]}" --file "$COMPOSE_FILE" "$@"
@@ -2016,24 +2021,30 @@ cmd_agent_help() {
 # constants and helpers). Only execute the dispatch block when run directly.
 [[ "${BASH_SOURCE[0]}" != "$0" ]] && return 0
 
-# Read DXBX_QUIET from .env/.env.local -- a single, simple .env-based switch
-# for display noise, as opposed to the two individual show_commands/
-# show_warnings flags below (only settable via the x-docopsbox compose
-# extension, which isn't something most project READMEs walk users through).
-# Runs here, not inside _load_env, because _load_env only runs per-command
-# (well after a command like `ex` has already decided what to print), and
-# must run before _read_compose_ext so an explicit show_commands/
-# show_warnings key there can still override this blanket switch.
-export DXBX_QUIET=false
-for _dxbx_quiet_file in "$ENV_FILE" "$ENV_LOCAL_FILE"; do
-  [[ -f "$_dxbx_quiet_file" ]] || continue
-  _dxbx_quiet_val=$(_env_key DXBX_QUIET "$_dxbx_quiet_file")
-  [[ -n "$_dxbx_quiet_val" ]] && DXBX_QUIET="$_dxbx_quiet_val"
-done
-unset _dxbx_quiet_file _dxbx_quiet_val
+# Reads KEY from .env/.env.local (last-set-wins), defaulting to false.
+_read_env_flag() {
+  local key="$1" val=false _file _v
+  for _file in "$ENV_FILE" "$ENV_LOCAL_FILE"; do
+    [[ -f "$_file" ]] || continue
+    _v=$(_env_key "$key" "$_file")
+    [[ -n "$_v" ]] && val="$_v"
+  done
+  printf '%s' "$val"
+}
+
+export DXBX_QUIET; DXBX_QUIET=$(_read_env_flag DXBX_QUIET)
 if [[ "$DXBX_QUIET" == true ]]; then
   DXBX_SHOW_COMMANDS=false
   DXBX_SHOW_WARNINGS=false
+fi
+
+# Overrides DXBX_QUIET, forces display on, traces dxbx's own execution.
+export DXBX_DEBUG; DXBX_DEBUG=$(_read_env_flag DXBX_DEBUG)
+if [[ "$DXBX_DEBUG" == true ]]; then
+  DXBX_QUIET=false
+  DXBX_SHOW_COMMANDS=true
+  DXBX_SHOW_WARNINGS=true
+  set -x
 fi
 
 # Load x-docopsbox settings from the compose file if it exists.
