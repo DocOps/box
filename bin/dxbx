@@ -97,11 +97,11 @@ _green() { [[ -n "${NO_COLOR:-}" ]] && printf '%s' "$*" || printf '\033[32m%s\03
 _yellow() { [[ -n "${NO_COLOR:-}" ]] && printf '%s' "$*" || printf '\033[33m%s\033[0m' "$*"; }
 _red() { [[ -n "${NO_COLOR:-}" ]] && printf '%s' "$*" || printf '\033[31m%s\033[0m' "$*"; }
 _tick() { printf '%s %s\n' "$(_green '✓')" "$*"; }
-_warn() { [[ "${DXBX_SHOW_WARNINGS:-true}" == true ]] && printf '%s %s\n' "$(_yellow '⚠')" "$*"; }
+_warn() { [[ "${DXBX_SHOW_WARNINGS:-true}" == true ]] && printf '%s %s\n' "$(_yellow '⚠')" "$*"; return 0; }
 _fail() { printf '%s %s\n' "$(_red '✗')" "$*"; }
 _info() { printf '  %s\n' "$*"; }
 _sep() { printf '%s\n' "────────────────────────────────────────────────"; }
-_run_echo() { [[ "${DXBX_SHOW_COMMANDS:-true}" == true ]] && printf '\n%s %s\n\n' "$(_bold '▶')" "$(_bold "$*")"; }
+_run_echo() { [[ "${DXBX_SHOW_COMMANDS:-true}" == true ]] && printf '\n%s %s\n\n' "$(_bold '▶')" "$(_bold "$*")"; return 0; }
 # end::universal-style-helpers[]
 
 # Read settings from x-docopsbox in docopsbox.yml using docker compose config.
