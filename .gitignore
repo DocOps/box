@@ -31,6 +31,7 @@ tmp/
 *.bak
 .warp/
 .agents/
+.agent/
 readme.html
 
 # Logs
