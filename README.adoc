@@ -1406,14 +1406,15 @@ FROM ${BASE_IMAGE}
 This pattern is appropriate when a project wants to ship end users (who may never see or need this `box` repository) a single, self-contained, pre-built image.
 Typical reasons to add a derived-image layer instead of using a stock tag directly:
 
-* *Pre-baking project dependencies.*
+Pre-baking project dependencies.::
 Use `bundle install`/`npm install`/`pip install` at image-build time, so end users never pay that cost on first run.
 Box's own `Dockerfile` supports this too for images built from source (see <<build-arg-directives>>), but a derived image lets a project pin and rebuild its own dependency bake without touching this repository or its shared, published tags.
 
-* *Native build dependencies the base image omits.*
+Native build dependencies the base image omits.::
 For example, `linux/arm64` hosts (Docker Desktop on Apple Silicon) may fall back to compiling gems/packages from source if no precompiled binary exists for that platform, requiring headers (`libyaml-dev`, `libssl-dev`, etc.) the base image does not install by default.
 
-* **Resolving a CLI name collision.** If a project ships its own executable also named `docops` (or any other name Box's images install to `/usr/local/bin`), renaming Box's copy in the derived image (then shelling out to it under its new name, if still needed) avoids a `PATH` collision without requiring changes to this repository.
+Resolving a CLI name collision.::
+If a project ships its own executable also named `docops` (or any other name Box's images install to `/usr/local/bin`), renaming Box's copy in the derived image (then shelling out to it under its new name, if still needed) avoids a `PATH` collision without requiring changes to this repository.
 
 Wire the derived image into `dxbx`/Compose by adding a `build:` block to the project's own `{compose_config_file}`, alongside (or instead of) the plain `image:` reference:
 
@@ -2518,6 +2519,25 @@ docker run --rm docopslab/box-mine:work pandoc --version
 docker run --rm docopslab/box-mine:work npm --version
 docker run --rm docopslab/box-mine:work python3 --version
 ....
+
+[[release-procedure]]
+==== Release Procedure
+
+The `latest` branch is the actual default branch (`main` is a placeholder).
+PRs merge there.
+
+. Bump `DOCOPSBOX_VERSION` in `bin/dxbx` and `:this_proj_vrsn:`/`:next_proj_vrsn:` in this README.
+. Merge to `latest`.
+. Tag the release and push the tag:
++
+[.prompt]
+ git tag -a vN.N.N -m "Release vN.N.N" && git push origin vN.N.N
+
+Running `dxbx reup` looks up the highest `vN.N.N` tag via the GitHub API and installs `bin/dxbx` from that tag, so commits on `latest` aren't distributed until tagged.
+
+A push to `latest` also triggers `build-images.yml`, which rebuilds and pushes the full image matrix to Docker Hub, but only when it touches `Dockerfile`, `hooks/`, `templates/.zshrc`, `scripts/build-matrix.sh`, or the workflow file itself (see its `paths:` filter).
+Everything else (docs, the `dxbx` script, this README) pushes without rebuilding any image.
+A manual rebuild (with an optional dry run) is available via the workflow's `workflow_dispatch` trigger on GitHub.
 
 [[contributing]]
 ==== Contributing
