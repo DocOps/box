@@ -1082,6 +1082,10 @@ Omit (or leave unset) to use the default ({default_ruby_version}).
 | `IMAGE_REGISTRY`
 | `docopslab`
 | Docker Hub username or registry prefix for the image.
+
+| `DXBX_QUIET`
+| `false`
+| Set to `true` to suppress non-essential output from the `dxbx` utility.
 |===
 
 The `PROJECT_SLUG` environment variable is used to create unique volume names for each project, so that dependencies installed in one project do not interfere with those in another.

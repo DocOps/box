@@ -131,8 +131,13 @@ _read_compose_ext() {
     printf '%s' "${val:-$default}"
   }
 
-  DXBX_SHOW_COMMANDS=$(_ext_bool 'show_commands' 'true')
-  DXBX_SHOW_WARNINGS=$(_ext_bool 'show_warnings' 'true')
+  # Fall back to the CURRENT value (not a hardcoded 'true') when the compose
+  # file doesn't define the key, so DXBX_QUIET's simpler .env-based default
+  # (set below, before this runs) survives for projects with no explicit
+  # x-docopsbox override -- an explicit show_commands/show_warnings key here
+  # still wins either way, since it's read fresh from the compose file.
+  DXBX_SHOW_COMMANDS=$(_ext_bool 'show_commands' "$DXBX_SHOW_COMMANDS")
+  DXBX_SHOW_WARNINGS=$(_ext_bool 'show_warnings' "$DXBX_SHOW_WARNINGS")
 }
 
 # Print per-command usage and exit if --help or -h is the first argument.
@@ -2006,6 +2011,26 @@ cmd_agent_help() {
 # Guard: skip when this file is sourced (e.g. by build-matrix.sh to import
 # constants and helpers). Only execute the dispatch block when run directly.
 [[ "${BASH_SOURCE[0]}" != "$0" ]] && return 0
+
+# Read DXBX_QUIET from .env/.env.local -- a single, simple .env-based switch
+# for display noise, as opposed to the two individual show_commands/
+# show_warnings flags below (only settable via the x-docopsbox compose
+# extension, which isn't something most project READMEs walk users through).
+# Runs here, not inside _load_env, because _load_env only runs per-command
+# (well after a command like `ex` has already decided what to print), and
+# must run before _read_compose_ext so an explicit show_commands/
+# show_warnings key there can still override this blanket switch.
+DXBX_QUIET=false
+for _dxbx_quiet_file in "$ENV_FILE" "$ENV_LOCAL_FILE"; do
+  [[ -f "$_dxbx_quiet_file" ]] || continue
+  _dxbx_quiet_val=$(_env_key DXBX_QUIET "$_dxbx_quiet_file")
+  [[ -n "$_dxbx_quiet_val" ]] && DXBX_QUIET="$_dxbx_quiet_val"
+done
+unset _dxbx_quiet_file _dxbx_quiet_val
+if [[ "$DXBX_QUIET" == true ]]; then
+  DXBX_SHOW_COMMANDS=false
+  DXBX_SHOW_WARNINGS=false
+fi
 
 # Load x-docopsbox settings from the compose file if it exists.
 # Must run after COMPOSE_FILE is resolved (top of script) and before any
