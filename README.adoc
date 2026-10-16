@@ -1387,6 +1387,50 @@ If you want to use `dxbx` commands and/or wish to share it with your team, do th
 
 This should execute `dxbx` commands on images sourced and built as you choose.
 
+[[derived-images]]
+==== Derived Images
+
+A downstream project does not need to clone this repository or touch `docker build` arguments at all if a published tag (`docopslab/box-min` or `docopslab/box-max`, any context) already covers most of what it needs.
+Instead, write a small `Dockerfile` in the *downstream project's own repository* that layers on top of a published tag:
+
+[.prompt]
+....
+ARG BASE_IMAGE=docopslab/box-max:live
+FROM ${BASE_IMAGE}
+....
+
+This pattern is appropriate when a project wants to ship end users (who may never see or need this `box` repository) a single, self-contained, pre-built image.
+Typical reasons to add a derived-image layer instead of using a stock tag directly:
+
+* *Pre-baking project dependencies.*
+Use `bundle install`/`npm install`/`pip install` at image-build time, so end users never pay that cost on first run.
+Box's own `Dockerfile` supports this too for images built from source (see <<build-arg-directives>>), but a derived image lets a project pin and rebuild its own dependency bake without touching this repository or its shared, published tags.
+
+* *Native build dependencies the base image omits.*
+For example, `linux/arm64` hosts (Docker Desktop on Apple Silicon) may fall back to compiling gems/packages from source if no precompiled binary exists for that platform, requiring headers (`libyaml-dev`, `libssl-dev`, etc.) the base image does not install by default.
+
+* **Resolving a CLI name collision.** If a project ships its own executable also named `docops` (or any other name Box's images install to `/usr/local/bin`), renaming Box's copy in the derived image (then shelling out to it under its new name, if still needed) avoids a `PATH` collision without requiring changes to this repository.
+
+Wire the derived image into `dxbx`/Compose by adding a `build:` block to the project's own `{compose_config_file}`, alongside (or instead of) the plain `image:` reference:
+
+[source,yaml]
+....
+services:
+  docops:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: docopslab/box-${IMAGE_VARIANT:-max}:${IMAGE_TAG:-live}
+    image: ${IMAGE_REGISTRY:-yourorg}/your-project:${IMAGE_TAG:-live}
+....
+
+Using `docker compose up`/`dxbx up` then builds the derived image from the local `Dockerfile` (pulling the `BASE_IMAGE` tag first, as needed) and tags it for reuse on subsequent runs, same as any other Compose `build:` configuration.
+
+A derived image's own `Dockerfile` is a normal project file:
+review it, keep it in version control, and document any build arguments it accepts the same as any other part of the project.
+It is deliberately outside the scope of this repository's own `docker build` tooling (<<custom-image-builds>>), which is for building *this project's* images, not for managing downstream projects' derived images.
+
 
 [[appendices]]
 == Appendices
