@@ -40,7 +40,7 @@ endif::[]
 :latest_ruby_version: 3.4
 :default_ruby_version: {docopslab_ruby_version}
 :default_nodejs_version: 24
-:this_proj_vrsn: 0.3.1
+:this_proj_vrsn: 0.3.2
 :next_proj_vrsn: 0.4.0
 :this_proj_src_latest_raw_url: {this_proj_src_raw_url}/refs/heads/latest
 :docopsbox_dockerfile_src_www_url: {this_proj_src_www_url}/tree/latest/Dockerfile

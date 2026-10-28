@@ -39,7 +39,7 @@ fi
 ENV_FILE="${PWD}/.config/.env"
 ENV_LOCAL_FILE="${PWD}/.config/.env.local"
 HISTORY_VOLUME="docops-shell-history"
-DOCOPSBOX_VERSION="0.3.1"
+DOCOPSBOX_VERSION="0.3.2"
 
 # XDG Base Directory paths for caching downloaded files (agent docs, etc.)
 XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
@@ -1733,6 +1733,13 @@ cmd_update() {
       # Clear the shell's command-path cache so the new binary is found immediately
       # without needing to open a new terminal.
       hash -r 2>/dev/null || rehash 2>/dev/null || true
+      # Re-exec into the freshly-written script for the rest of this
+      # invocation (image/dependency updates below). Continuing in this
+      # process instead -- even after an atomic mv -- was observed to
+      # corrupt execution with spurious syntax errors further down this
+      # same function; a fresh process reading the new file from scratch
+      # doesn't have that problem.
+      exec "$install_path" "${_DXBX_ORIG_ARGS[@]}"
     else
       printf 'dxbx reup skipped.\n'
     fi
