@@ -39,7 +39,7 @@ fi
 ENV_FILE="${PWD}/.config/.env"
 ENV_LOCAL_FILE="${PWD}/.config/.env.local"
 HISTORY_VOLUME="docops-shell-history"
-DOCOPSBOX_VERSION="0.2.0"
+DOCOPSBOX_VERSION="0.3.0"
 
 # XDG Base Directory paths for caching downloaded files (agent docs, etc.)
 XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
@@ -725,6 +725,27 @@ _confirm() {
   printf '%s [y/N] ' "$(_yellow "$1")"
   read -r reply
   [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# Install one ecosystem's dependencies inside a fresh container, for cmd_update's
+# dependency-refresh step. Usage: _dep_refresh "label" <install-command...>
+#
+# Runs as RUN_USER=root: on hosts where HOST_UID already matches the image's
+# baked-in appuser UID, entrypoint.sh skips its chown of the dependency
+# volumes, leaving root-owned files from the image's own build-time install
+# that appuser can't overwrite.
+_dep_refresh() {
+  local label="$1"; shift
+  if [[ "${force:-false}" == true ]] || _confirm "Install updated ${label} dependencies?"; then
+    _info "Installing: $*"
+    if _compose run --rm -e RUN_USER=root docops "$@"; then
+      _tick "${label} dependencies up to date."
+    else
+      _fail "${label} dependency install failed; see output above."
+    fi
+  else
+    printf '%s dependency update skipped.\n' "$label"
+  fi
 }
 
 # Fetch a URL to stdout; tries curl then wget.
@@ -1630,7 +1651,7 @@ cmd_build() {
 
 cmd_update() {
   _check_help "${1:-}" "reup" \
-    "Download the latest dxbx and pull the latest image for this project." \
+    "Download the latest dxbx, pull the latest image, and refresh project dependencies." \
     "dxbx reup [--force] [image-spec]" \
     "  --force     Skip version check and confirmation prompts" \
     "  image-spec  Optional. Pull a specific variant/context instead of the configured default."
@@ -1741,6 +1762,25 @@ cmd_update() {
   else
     printf 'Image update skipped.\n'
   fi
+
+  # Dependency update: Gemfile/package.json/requirements.txt changes (a `git
+  # pull` picking up a new gem/package) land in the project's bind-mounted
+  # working tree immediately, with no image rebuild needed -- see _dep_refresh.
+  printf '\n%s\n' "$(_bold 'Checking for dependency updates...')"
+  local found_deps=false
+  if [[ -f "${PWD}/Gemfile" ]]; then
+    found_deps=true
+    _dep_refresh "Ruby (Gemfile)" bundle install
+  fi
+  if [[ -f "${PWD}/package.json" ]]; then
+    found_deps=true
+    _dep_refresh "Node (package.json)" npm install
+  fi
+  if [[ -f "${PWD}/requirements.txt" ]]; then
+    found_deps=true
+    _dep_refresh "Python (requirements.txt)" pip install -r requirements.txt
+  fi
+  [[ "$found_deps" == true ]] || _info "No dependency manifests found (Gemfile/package.json/requirements.txt); skipping."
 }
 
 cmd_pull() {
@@ -1977,7 +2017,7 @@ $(_bold 'Help:')
 
 $(_bold 'Setup commands:')
   $(_bold 'init')              Bootstrap a project directory with DocOps Box config files
-  $(_bold 'reup')              Download the latest dxbx and pull the latest image  (alias: update)
+  $(_bold 'reup')              Update dxbx, pull the latest image, refresh dependencies  (alias: update)
   $(_bold 'pull') [spec]       Pull the project image only (no dxbx script update)
   $(_bold 'install')           Copy dxbx to ~/.local/bin/ for system-wide shell access
   $(_bold 'uninstall')         Remove the installed binary and data directory (backups, etc.)
