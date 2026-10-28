@@ -39,7 +39,7 @@ fi
 ENV_FILE="${PWD}/.config/.env"
 ENV_LOCAL_FILE="${PWD}/.config/.env.local"
 HISTORY_VOLUME="docops-shell-history"
-DOCOPSBOX_VERSION="0.3.0"
+DOCOPSBOX_VERSION="0.3.1"
 
 # XDG Base Directory paths for caching downloaded files (agent docs, etc.)
 XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
@@ -1681,7 +1681,12 @@ cmd_update() {
   fi
   local upstream_ver="${latest_tag#v}"
 
-  local tmpfile; tmpfile=$(mktemp)
+  # Staged in install_dir itself (not /tmp) so the final replace below is an
+  # atomic same-filesystem rename, not a cross-device copy -- overwriting the
+  # running script's bytes in place can corrupt execution for the rest of
+  # this invocation (anything read from disk after the overwrite, such as
+  # the image/dependency-update steps further down this very function).
+  local tmpfile; tmpfile=$(mktemp "${install_dir}/.dxbx-update.XXXXXX")
   # shellcheck disable=SC2064
   trap "rm -f '$tmpfile'" EXIT
 
@@ -1718,8 +1723,8 @@ cmd_update() {
         _info "The installed version has not been changed. Try again."
         exit 1
       fi
-      cp "$tmpfile" "$install_path"
-      chmod +x "$install_path"
+      chmod +x "$tmpfile"
+      mv -f "$tmpfile" "$install_path"
       if [[ "$upstream_ver" == "$DOCOPSBOX_VERSION" ]]; then
         _tick "Reinstalled: $install_path (v${upstream_ver})"
       else
